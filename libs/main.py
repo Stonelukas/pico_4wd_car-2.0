@@ -15,7 +15,12 @@ import os
 import micropython
 import machine as machine
 import classes.motors as car
+<<<<<<< HEAD
 from classes.follow import Follow
+=======
+import classes.follow as
+from classes.follow import follow
+>>>>>>> dde97ccd33c4c4dbfe88673b4d2a21fdc98ebb99
 import classes.sonar as sonar
 import classes.lights as lights
 from classes.speed import Speed

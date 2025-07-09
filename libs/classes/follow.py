@@ -5,7 +5,11 @@ from machine import Pin
 
 from classes.tcs34725 import *
 
+<<<<<<< HEAD
 class Follow:
+=======
+class follow:
+>>>>>>> dde97ccd33c4c4dbfe88673b4d2a21fdc98ebb99
     def __init__(self, Left_channel, Middle_channel, Right_channel, target_rgb):
         print("Starting tcs34735")
         self.i2c_instance = I2C()
