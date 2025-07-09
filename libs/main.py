@@ -9,13 +9,13 @@ Pico onboard LED status:
     - blink: error
 
 *****************************************************************************************'''
-import asyncio
 import time
 import sys
 import os
 import micropython
 import machine as machine
 import classes.motors as car
+from classes.follow import Follow
 import classes.sonar as sonar
 import classes.lights as lights
 from classes.speed import Speed
@@ -296,61 +296,13 @@ def get_dir(sonar_data, split_str="0"):
     else:
         return "forward"
 
-'''----------------- line_track ---------------------'''
-def line_track():
-    global move_status, line_out_time
-    _power = LINE_TRACK_POWER
-    gs_data = grayscale.get_line_status()
-    # print(f"gs_data: {gs_data}, {grayscale.line_ref}")
-
-    if gs_data == [0, 0, 0] or gs_data == [1, 1, 1] or gs_data == [1, 0, 1] and not debug:
-        # If the car is out of the line, stop it
-        if line_out_time == 0:
-            line_out_time = time.time()
-        if (time.time() - line_out_time > 2):
-            print_line_out_time(gs_data)
-            car.move('stop')
-            move_status = 'stop'
-            line_out_time = 0
-        return
-    else:
-        line_out_time = 0
-
-    if gs_data == [0, 1, 0]:
-        if not debug:
-            car.set_motors_power([_power, _power, _power, _power]) # forward
-            print(f"Direction: forward, gs_data: {gs_data}")
-        else:
-            debug_print(("Direction: forward", gs_data), action=mode, msg='Line Track Direction')
-        move_status = 'forward'
-    elif gs_data == [0, 1, 1]:
-        if not debug:
-            car.set_motors_power([_power, int(_power/5), _power, int(_power/5)]) # right
-            print(f"Direction: right, gs_data: {gs_data}")
-        else:
-            debug_print(("Direction: right", gs_data), action=mode, msg='Line Track Direction')
-        move_status = 'right'
-    elif gs_data == [0, 0, 1]:
-        if not debug:
-            car.set_motors_power([_power, int(-_power/2), _power, int(-_power/2)]) # right plus
-            print(f"Direction: right plus, gs_data: {gs_data}")
-        else:
-            debug_print(("Direction: right plus", gs_data), action=mode, msg='Line Track Direction')
-        move_status = 'right'
-    elif gs_data == [1, 1, 0]:
-        if not debug:
-            car.set_motors_power([int(_power/5), _power, int(_power/5), _power]) # left
-            print(f"Direction: left, gs_data: {gs_data}")
-        else:
-            debug_print(("Direction: left", gs_data), action=mode, msg='Line Track Direction')
-        move_status = 'left'
-    elif gs_data == [1, 0, 0]:
-        if not debug:
-            car.set_motors_power([int(-_power/2), _power, int(-_power/2), _power]) # left plus
-            print(f"Direction: left plus, gs_data: {gs_data}")
-        else:
-            debug_print(("Direction: left plus", gs_data), action=mode, msg='Line Track Direction')
-        move_status = 'left'
+'''----------------- color_line_track ---------------------'''
+def color_line_track():
+    # Example: channels 1, 2, 3 and a red line (adjust as needed)
+    # You may want to move this instantiation outside the function for efficiency
+    target_rgb = (255, 0, 0)  # Set this to your line color
+    follower = Follow(Left_channel=1, Middle_channel=2, Right_channel=3, target_rgb=target_rgb)
+    follower.follow_line(power=LINE_TRACK_POWER)
 
 '''----------------- obstacle_avoid ---------------------'''
 def obstacle_avoid():
@@ -768,10 +720,8 @@ def remote_handler():
     ''' mode: Line Track or Obstacle Avoid or Follow '''
     if not dpad_touched and mode != 'anti fall':
         if mode == 'line track':
-            sonar_angle = 0
-            sonar_distance = sonar.get_distance_at(0)
             print_line_track()
-            line_track()
+            color_line_track()
         elif mode == 'obstacle avoid':
             print_obstacle_avoid()
             obstacle_avoid()
