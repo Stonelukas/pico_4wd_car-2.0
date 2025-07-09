@@ -40,14 +40,14 @@ TCSGAIN_HIGH = const(2)
 TCSGAIN_MAX = const(3)
 TCSGAIN_FACTOR = (const(1), const(4), const(16), const(60))
 
-# Codes for Intergration time
+# Codes for Integration time
 TCSINTEG_MIN = const(255)            # 2.4 ms 
 TCSINTEG_LOW = const(252)            # 9.4
 TCSINTEG_MEDIUM = const(240)            # 38.4
 TCSINTEG_HIGH = const(192)            # 153.6
 TCSINTEG_MAX = const(0)              # 614.4
 
-# TCS34725 specific clear interupt threshholds 
+# TCS34725 specific clear interrupt thresholds 
 TCSREG_WTIME = const(0x03)
 TCSREG_AILTL = const(0x04)
 TCSREG_AILTH = const(0x05)
@@ -103,24 +103,17 @@ class TCS34725:
     def deinit(self):
         self.__Bus.unlock()
     
-    def switch_channel(self, chan=None, left=False, middle=False, right=False):
-        if not any([left, middle, right]):
-            if chan in range(1, 3): 
-                self.channel = chan
-                print("changed to Channel: ", chan)
-            current_channel = self.channel
-            if current_channel == 3 and chan == None:
-                self.channel = 1
-                print("changed to Channel: ", chan)
-            else:
-                self.channel = chan
-                print("changed to Channel: ", chan)
-        elif left:
+    def switch_channel(self, chan=None):
+        if chan in range(1, 3): 
+            self.channel = chan
+            print("changed to Channel: ", chan)
+        current_channel = self.channel
+        if current_channel == 3 and chan == None:
             self.channel = 1
-        elif middle:
-            self.channel = 2
-        elif right:
-            self.channel = 3
+            print("changed to Channel: ", chan)
+        else:
+            self.channel = chan
+            print("changed to Channel: ", chan)
         
         self.__Bus.reinit(channel=self.channel if self.channel is not None else 1)
 
@@ -267,6 +260,17 @@ class TCS34725:
                 self.__read_alldata()
                 counts = unpack(format_counts, self.__buf8)
         return counts
+
+    @property
+    def color_raw(self):
+        """Return raw color data as a tuple (red, green, blue, clear)."""
+        self.__read_alldata()
+        # Unpack the buffer into clear, red, green, blue (order as per datasheet)
+        clear = self.__buf8[1] << 8 | self.__buf8[0]
+        red   = self.__buf8[3] << 8 | self.__buf8[2]
+        green = self.__buf8[5] << 8 | self.__buf8[4]
+        blue  = self.__buf8[7] << 8 | self.__buf8[6]
+        return (red, green, blue, clear)
 
     def read_all(self, addr, lenght, stop=False):
         stop = stop or False
