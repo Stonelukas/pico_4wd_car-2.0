@@ -1,0 +1,285 @@
+from machine import Pin, SoftI2C
+from time import sleep_ms
+from micropython import const
+from struct import unpack
+from classes.mux import TCA9548A_Channel, TCA9548A
+from classes.i2c import I2C
+
+TCS3472_I2C_ADDR = const(0x29)      # I2C default address
+TCS3472_FREQ = const(400000)        # I2C default baudrate
+
+TCS34725_ID = const(0x44)            # Device ID TCS3472
+TCS34727_ID = const(0x4D)
+
+TCS3472x_dict = {TCS34725_ID : "TCS34725",
+                 TCS34727_ID : "TCS34727"}
+
+TCSREG_ENABLE = const(0x00)          # Enable states and interrupts 
+TCSREG_ATIME = const(0x01)           # RGBC time
+TCSREG_CONFIG = const(0x0D)          # Configuration
+TCSREG_CONTROL = const(0x0F)         # Control
+TCSREG_ID = const(0x12)              # Device ID
+TCSREG_STATUS = const(0x13)          # Device Status
+TCSREG_ALLDATA = const(0x14)         # All data low byte
+TCSREG_CDATA = const(0x14)           # Clear data low byte
+TCSREG_RDATA = const(0x16)           # Red data low byte
+TCSREG_GDATA = const(0x18)           # Green data low byte
+TCSREG_BDATA = const(0x1A)           # Blue data low byte
+
+TCSCMD_ADDRESS = const(0xA0)
+TCSCMD_POWER_OFF = const(0x00)           # Power Off
+TCSCMD_POWER_ON =  const(0x01)           # Power ON
+TCSCMD_AEN = const(0x02)                 # RGBC enable
+
+TCSSTAT_AVALID = const(0x01)             # AVALID bit in status register
+
+# ADC gain
+TCSGAIN_MIN = const(0)               
+TCSGAIN_LOW = const(1)
+TCSGAIN_HIGH = const(2)
+TCSGAIN_MAX = const(3)
+TCSGAIN_FACTOR = (const(1), const(4), const(16), const(60))
+
+# Codes for Intergration time
+TCSINTEG_MIN = const(255)            # 2.4 ms 
+TCSINTEG_LOW = const(252)            # 9.4
+TCSINTEG_MEDIUM = const(240)            # 38.4
+TCSINTEG_HIGH = const(192)            # 153.6
+TCSINTEG_MAX = const(0)              # 614.4
+
+# TCS34725 specific clear interupt threshholds 
+TCSREG_WTIME = const(0x03)
+TCSREG_AILTL = const(0x04)
+TCSREG_AILTH = const(0x05)
+TCSREG_AIHTL = const(0x06)
+TCSREG_AIHTH = const(0x07)
+TCSREG_PERS = const(0x0C)
+
+class TCS34725:
+    """ TCS34725 class
+        Create an I2C instance for the PyBoard/ESP32/ESP8266.
+        <addr> is I2C address, optional, default 0x29
+        <scl> and <sda> are required parameters, to be specified as Pin objects
+        <freq> is I2C clock frequency, optional, default 400 KHz
+        Default values for gain, integration time and autogain are set,
+        but these may be changed any time by the user program.
+    """
+    def __init__(self, channel: int, addr=TCS3472_I2C_ADDR, freq=TCS3472_FREQ): 
+        self.__addr = addr
+        self.__buf1 = bytearray(1)                    # one-byte buffer
+        self.__buf8 = bytearray(8)                    # 8-byte buffer
+        self.__gain = 0
+        self.__integ = 0
+        self.__id = 0x00                               # Device id
+        self.__autogain = False
+        self.__connected = False
+        i2c_instance = I2C()
+        self.tca = TCA9548A(i2c=i2c_instance)
+        self.__Bus = TCA9548A_Channel(self.tca, channel=channel)
+        self.__channel = channel
+        # self.__Bus = tcagcc
+        try:
+            self.__Bus.try_lock()
+            self.__Bus.writeto(self.__addr, b'\x80')            # Test write
+        except OSError:
+            print("Failed to connect to device with I2C address 0x{:02x}".format(self.__addr))
+            return
+        self.deinit()
+        self.__write_register(TCSREG_ENABLE, TCSCMD_POWER_ON | TCSCMD_AEN)
+        sleep_ms(5)
+        self.__id = self.__read_register(TCSREG_ID)
+        self.__connected = True
+        if not self.__id in TCS3472x_dict.keys():
+            print("Failed to detect supported color sensor")
+            print("Expected ID {:#X} ({:s}) or {:#X} ({:s}), received {:#02X} : {:s}".format(
+                    TCS34725_ID, TCS3472x_dict[TCS34725_ID],
+                    TCS34727_ID, TCS3472x_dict[TCS34727_ID],
+                    self.__id, self.device_type))
+            return
+        print("Connected {:s} at address 0x{:02x}".format(self.device_type, self.__addr))
+        self.gain = TCSGAIN_LOW
+        self.integ = TCSINTEG_MEDIUM
+
+    def deinit(self):
+        self.__Bus.unlock()
+    
+    def switch_channel(self, chan=None, left=False, middle=False, right=False):
+        if not any([left, middle, right]):
+            if chan in range(1, 3): 
+                self.channel = chan
+                print("changed to Channel: ", chan)
+            current_channel = self.channel
+            if current_channel == 3 and chan == None:
+                self.channel = 1
+                print("changed to Channel: ", chan)
+            else:
+                self.channel = chan
+                print("changed to Channel: ", chan)
+        elif left:
+            self.channel = 1
+        elif middle:
+            self.channel = 2
+        elif right:
+            self.channel = 3
+        
+        self.__Bus.reinit(channel=self.channel if self.channel is not None else 1)
+
+    def __read_register(self, reg):
+        """ read register <reg>, return integer value """
+        try:
+            self.__Bus.readfrom_mem_into(self.__addr, TCSCMD_ADDRESS | reg, self.__buf1)
+            return self.__buf1[0]
+        except Exception as err:
+            print("I2C read_register error:", err)
+            return -1
+    
+    def __write_register(self, reg, data):
+        """ write register """
+        self.__buf1[0] = data
+        try:
+            self.__Bus.writeto_mem(self.__addr, TCSCMD_ADDRESS | reg, self.__buf1)
+        except Exception as err:
+            print("I2C write_byte error:", err)
+            return False
+        return True
+    
+    def __read_alldata(self):
+        """ read all counts (8 contigguous data registers) into local buffer """
+        try:
+            self.__Bus.readfrom_mem_into(self.__addr, TCSCMD_ADDRESS | TCSREG_ALLDATA, self.__buf8)
+            return self.__buf8
+        except Exception as err:
+            print("I2C read all data error:", err)
+
+    def __adjustgain_one_step(self, counts):
+        """ adjust gain (if possible!) when a certain count limits are reached:
+            <counts> is tuple of 4 integers
+            switch to lower gain when highest count exceeds 85% of maximum
+            switch to higher gain when highest count is below 15% of maximum
+            note: quotient of high over low boundaries must be greater
+                than 4 to prevent flip-flopping between gain factors
+            return True when gain changed, False otherwise
+        """
+
+        UNDERFLOW_PERCENT = const(15)
+        OVERFLOW_PERCENT = const(85)
+        print("overflow_count=", self.overflow_count)
+        count_max = max(counts)
+        if count_max >= self.overflow_count * OVERFLOW_PERCENT // 100:
+            if self.gain > TCSGAIN_MIN:
+                print("==> Actual gain factor", self.gain_factor, end="")
+                self.gain -= 1 
+                print(", new", self.gain_factor)
+                return True
+        elif count_max < self.overflow_count * UNDERFLOW_PERCENT // 100:
+            if self.gain < TCSGAIN_MAX:
+                print("==> Actual gain factor", self.gain_factor, end="")
+                self.gain += 1
+                print(", new", self.gain_factor)
+                return True
+        return False
+
+    """ Public methods and properties """
+    
+    def close(self):
+        """ Power-down device and close I2C bus (if supported) """
+        self.__write_register(TCSREG_ENABLE, TCSCMD_POWER_OFF)
+        self.__connected = False
+
+    @property
+    def channel(self):
+        """ return integer of current channel of the multiplexer"""
+        return self.__channel
+
+    @channel.setter
+    def channel(self, channel):
+        """ set channel of of the multiplexer """
+        self.__channel = channel
+
+    @property
+    def isconnected(self):
+        """ return status of connection """
+        return self.__connected
+        
+
+    @property
+    def device_type(self):
+        """ return name (string) of connected sensor """
+        return TCS3472x_dict.get(self.__id, "Unknown")
+
+    @property
+    def gain(self):
+        """ return current gain code """
+        return self.__gain
+    
+    @gain.setter 
+    def gain(self, gain):
+        """ set gain code (0..3), forced to a value within limits """
+        self.__gain = max(TCSGAIN_MIN, min(TCSGAIN_MAX, gain))
+        self.__write_register(TCSREG_CONTROL, self.gain)
+        sleep_ms(2 * self.integration_time)
+    
+    @property
+    def gain_factor(self):
+        """ return current gain factor """
+        return TCSGAIN_FACTOR[self.__gain]
+
+    @property
+    def autogain(self):
+        """ return current autogain setting """
+        return self.__autogain
+    
+    @autogain.setter
+    def autogain(self, autogain_new):
+        """ set autogain setting (True/False) """
+        self.__autogain = True if autogain_new == True else False
+
+    @property
+    def integ(self):
+        """ return current integrationtime code code"""
+        return self.__integ
+    
+    @integ.setter
+    def integ(self, integ):
+        """ set integrationtime code (255..0), forced to a value within limits """
+        self.__integ = max(TCSINTEG_MAX, min(TCSINTEG_MIN, integ))
+        self.__write_register(TCSREG_ATIME, self.__integ)
+        sleep_ms(2 * self.integration_time)
+    
+    @property
+    def integration_time(self):
+        """ return current integration time in milliseconds """
+        return int(2.4 * (256 - self.__integ))
+
+    @property
+    def overflow_count(self):
+        """ return maximum count for actual integration time """
+        return min(65535, (256 - self.__integ) * 1024)
+    
+    @property
+    def colors(self):
+        """ read all data registers, return tuple: (clear, red, green, blue) """
+        self.__read_alldata()
+        format_counts = "<HHHH"                     # 4 USHORTS ( 16-bits, Little Endian)
+        counts = unpack(format_counts, self.__buf8)
+        if self.__autogain == True:
+            while self.__adjustgain_one_step(counts):
+                self.__read_alldata()
+                counts = unpack(format_counts, self.__buf8)
+        return counts
+
+    def read_all(self, addr, lenght, stop=False):
+        stop = stop or False
+        self.__Bus.readfrom_mem(addr, 0x00, 16)
+        pass
+    
+    def write(self, data):
+        self.__Bus.write(data)
+    
+    def writeto(self, addr, data, stop=False):
+        stop = stop or False
+        self.__Bus.writeto(addr, data, stop)
+    
+    def start(self):
+        self.writeto(0x00, 0x01)
+

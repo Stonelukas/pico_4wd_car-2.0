@@ -1,0 +1,7 @@
+
+------------------------------
+
+> bufxx: b'\n'
+> bufxx: b'ets Jan  8 2013,rst cause:1, boot mode:(3,0)\r\n'
+> bufxx: b'\n'
+> bufxx: b'\n'
