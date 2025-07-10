@@ -1,5 +1,5 @@
-from servo import Servo
-from ultrasonic import Ultrasonic
+from classes.servo import Servo
+from classes.ultrasonic import Ultrasonic
 import time
 
 servo = Servo(18)

@@ -2,7 +2,7 @@ import sys
 from time import sleep
 from machine import SoftI2C, Pin
 
-from classes.tcs34725 import * 
+from classes.standalone_tcs34725 import * 
 
 def main():
     print("Starting tcs34735")
@@ -14,12 +14,12 @@ def main():
     tcs.integ = TCSINTEG_HIGH
     tcs.autogain = True
     
-    color_names = ("Clear", "Red", "Green", "Blue")
+    color_names = ("Red", "Green", "Blue", "Clear")
     print(" Clear    Red Green  Blue     gain   >")
     try:
         while True:
             """ show color counts """
-            counts_tuple = tcs.colors
+            counts_tuple = tcs.color_raw
             counts = list(counts_tuple)
             for count in counts_tuple:
                 if count >= tcs.overflow_count:

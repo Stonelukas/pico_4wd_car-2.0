@@ -62,7 +62,7 @@ class TCS34725:
         Default values for gain, integration time and autogain are set,
         but these may be changed any time by the user program.
     """
-    def __init__(self, channel: int, addr=TCS3472_I2C_ADDR, scl=None, sda=None, freq=TCS3472_FREQ): 
+    def __init__(self, addr=TCS3472_I2C_ADDR, scl=None, sda=None, freq=TCS3472_FREQ): 
         self.__addr = addr
         self.__buf1 = bytearray(1)                    # one-byte buffer
         self.__buf8 = bytearray(8)                    # 8-byte buffer
@@ -233,6 +233,17 @@ class TCS34725:
                 counts = unpack(format_counts, self.__buf8)
         return counts
 
+    @property
+    def color_raw(self):
+        """ Return raw color data as a tuple (red, green, blue, clear). """
+        self.__read_alldata()
+        # Unpack the buffer into clear , red, green, blue
+        clear = self.__buf8[1] << 8 | self.__buf8[0]
+        red = self.__buf8[3] << 8 | self.__buf8[2]
+        green = self.__buf8[5] << 8 | self.__buf8[4]
+        blue = self.__buf8[7] << 8 | self.__buf8[6]
+        return (red, green, blue, clear)
+
     def scan(self):
         results = self.__Bus.scan()
         print(f"Devices found: \r \n {results}")
@@ -241,7 +252,6 @@ class TCS34725:
         stop = stop or False
         self.__Bus.readfrom_mem(addr, 0x00, 16)
         pass
-    
     
     def write(self, data):
         self.__Bus.write(data)

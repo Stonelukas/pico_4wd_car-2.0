@@ -1,4 +1,5 @@
 from machine import UART
+from typing import Any, Dict
 import time
 import json
 
@@ -11,6 +12,7 @@ class TimeoutError(Exception):
 
 LOG_FILE = "log.txt"
 
+
 def log(msg):
     with open(LOG_FILE, "a") as log_f:
         log_f.write(f'\n> {msg}')
@@ -19,8 +21,8 @@ def log(msg):
 class WS_Server():
     WS_TIMEOUT = 10000 # ms
     SEND_INTERVAL = 100 # ms
-    
-    send_dict = {
+
+    send_dict: Dict[str, Any] = {
         'Name': '',
         'Type': 'PICO-4WD Car',
         'Check': 'SC',

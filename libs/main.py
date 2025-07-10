@@ -11,17 +11,16 @@ Pico onboard LED status:
 *****************************************************************************************'''
 import time
 import sys
-import os
-import micropython
 import machine as machine
-import classes.motors as car
-from classes.follow import Follow
-import classes.sonar as sonar
-import classes.lights as lights
+import motors as car
+import sonar as sonar
+import lights as lights
+from helper import *
 from classes.speed import Speed
 from classes.grayscale import Grayscale
 from ws import WS_Server
 from machine import Pin
+from classes.follow import Follow
 
 VERSION = '1.3.0'
 print(f"[ Pico-4WD Car App Control {VERSION}]\n")
@@ -95,7 +94,7 @@ VOICE_CONTROL_POWER = 50
 LINE_TRACK_POWER = 80
 
 '''Configure singal light'''
-singal_on_color = [80, 30, 0] # amber:[255, 191, 0]
+singal_on_color = [255, 255, 0] # amber:[255, 191, 0]
 brake_on_color = [255, 0, 0] 
 
 '''------------ Configure Voice Control Commands -------------'''
@@ -143,6 +142,11 @@ brake_light_time = 0
 brake_light_brightness = 255 # 0 ~ 255
 brake_light_brightness_flag = -1 # -1 or 1
 
+# Signal light blinking variables
+signal_blink_state = False
+signal_blink_time = 0
+signal_blink_interval = 0.5  # 500ms blink interval
+
 anti_fall_enabled = False
 on_edge = False
 
@@ -161,6 +165,7 @@ line_out_time = 0
 '''------------ Instantiate -------------'''
 try:
     speed = Speed(8, 9)
+    sensors = Follow(Left_channel=1, Middle_channel=2, Right_channel=3, target_rgb=(255, 0, 0))
     grayscale = Grayscale(26, 27, 28)
     ws = WS_Server(name=NAME, mode=WIFI_MODE, ssid=SSID, password=PASSWORD)
 except Exception as e:
@@ -173,55 +178,6 @@ except Exception as e:
     
 
 '''----------------- Helper Functions ---------------------'''
-# Profiling
-def profiler(f, *args, **kwargs):
-    myname = str(f).split(' ')[1]
-    def new_func(*args, **kwargs):
-        t = time.ticks_us()
-        result = f(*args, **kwargs)
-        delta = time.ticks_diff(time.ticks_us(), t)
-        print('Function {} Time = {:6.3f}ms'.format(myname, delta/1000))
-        return result
-    return new_func
-
-
-def print_on_change(func):
-    '''Decorator to run a function only when the arguments change.'''
-    last_args = None
-    last_kwargs = None
-    def wrapper(*args, **kwargs):
-        nonlocal last_args, last_kwargs
-        if args != last_args or kwargs != last_kwargs:
-            last_args = args
-            last_kwargs = kwargs.copy() if kwargs else None
-            return func(*args, **kwargs)
-    return wrapper
-
-# Custom Print
-original_print = print
-# @print_on_change
-def custom_print(*args, **kwargs):
-    """Custom print function to also redirect output to a log file and print a new line after each call."""
-    # with open(LOG_FILE, "a") as log_f:
-    #     log_f.write(' '.join(map(str, args)) + '\n')
-    original_print(*args, **kwargs)
-    original_print()  # Print a new line after each call
-
-
-# Set the custom print function
-print = custom_print
-
-def print_once(func):
-    has_run = False
-    """Decorator to print a message only once."""
-    def wrapper(*args, **kwargs):
-        nonlocal has_run
-        if not has_run:
-            func(*args, **kwargs)
-            has_run = True
-    return wrapper
-
-
 
 @print_once
 def print_obstacle_avoid():
@@ -232,13 +188,9 @@ def print_follow():
     print(" Follow Mode Enabled \r \n")
 
 @print_once
-def print_line_track():
+def print_color_line_track():
     print(" Line Track Mode Enabled \r \n")
     
-@print_once
-def print_line_out_time(gsdata):
-    print(f"Line out time: {time.time() - line_out_time:.2f} s, stop car, gs_data: {gsdata}")
-
 @print_on_change
 def debug_print(*data, action=None, msg="Debug data"):
     """Print debug messages if debug mode is enabled."""
@@ -298,11 +250,12 @@ def get_dir(sonar_data, split_str="0"):
 
 '''----------------- color_line_track ---------------------'''
 def color_line_track():
+    global move_status
     # Example: channels 1, 2, 3 and a red line (adjust as needed)
     # You may want to move this instantiation outside the function for efficiency
     target_rgb = (255, 0, 0)  # Set this to your line color
-    follower = Follow(Left_channel=1, Middle_channel=2, Right_channel=3, target_rgb=target_rgb)
-    follower.follow_line(power=LINE_TRACK_POWER)
+    sensors.target_color = target_rgb
+    move_status = sensors.follow_line(power=LINE_TRACK_POWER)
 
 '''----------------- obstacle_avoid ---------------------'''
 def obstacle_avoid():
@@ -434,12 +387,29 @@ def follow():
 
 '''----------------- singal_lights_handler ---------------------'''
 def singal_lights_handler():
+    """ Blink left or Right depending on the direction the car is moving """
+    global signal_blink_state, signal_blink_time, signal_blink_interval
+    
+    current_time = time.time()
+    
+    # Check if it's time to toggle the blink state
+    if current_time - signal_blink_time >= signal_blink_interval:
+        signal_blink_state = not signal_blink_state
+        signal_blink_time = current_time
+    
+    # Set the signal lights based on move_status and blink state
     if move_status == 'left':
-        lights.set_rear_left_color(singal_on_color)
+        if signal_blink_state:
+            lights.set_rear_left_color(singal_on_color)
+        else:
+            lights.set_rear_left_color(0x000000)
         lights.set_rear_right_color(0x000000)
     elif move_status == 'right':
         lights.set_rear_left_color(0x000000)
-        lights.set_rear_right_color(singal_on_color)
+        if signal_blink_state:
+            lights.set_rear_right_color(singal_on_color)
+        else:
+            lights.set_rear_right_color(0x000000)
     else:
         lights.set_rear_left_color(0x000000)
         lights.set_rear_right_color(0x000000)
@@ -496,8 +466,8 @@ def on_receive(data):
         return
 
     ''' data to display'''
-    # greyscale
-    ws.send_dict['A'] = grayscale.get_value()
+    # grayscale
+    ws.send_dict['A'] = sensors.color_match(sensors.target_color)
     # Speed measurement
     ws.send_dict['B'] = round(speed.get_speed(), 2) # uint: cm/s
     # Speed mileage
@@ -720,7 +690,7 @@ def remote_handler():
     ''' mode: Line Track or Obstacle Avoid or Follow '''
     if not dpad_touched and mode != 'anti fall':
         if mode == 'line track':
-            print_line_track()
+            print_color_line_track()
             color_line_track()
         elif mode == 'obstacle avoid':
             print_obstacle_avoid()

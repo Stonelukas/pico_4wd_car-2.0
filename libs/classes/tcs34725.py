@@ -3,7 +3,9 @@ from time import sleep_ms
 from micropython import const
 from struct import unpack
 from classes.mux import TCA9548A_Channel, TCA9548A
-from classes.i2c import I2C
+from classes.i2c import MyI2C
+
+from typing_extensions import Literal
 
 TCS3472_I2C_ADDR = const(0x29)      # I2C default address
 TCS3472_FREQ = const(400000)        # I2C default baudrate
@@ -64,85 +66,103 @@ class TCS34725:
         Default values for gain, integration time and autogain are set,
         but these may be changed any time by the user program.
     """
-    def __init__(self, channel: int, addr=TCS3472_I2C_ADDR, freq=TCS3472_FREQ): 
+    def __init__(self, channel, i2c=None, addr=TCS3472_I2C_ADDR, freq=TCS3472_FREQ): 
         self.__addr = addr
-        self.__buf1 = bytearray(1)                    # one-byte buffer
-        self.__buf8 = bytearray(8)                    # 8-byte buffer
+        self.__buf1 = bytearray(1)            # one-byte buffer
+        self.__buf8 = bytearray(8)            # 8-byte buffer
         self.__gain = 0
         self.__integ = 0
-        self.__id = 0x00                               # Device id
+        self.__id = 0x00                      # Device id
+        self.__channel = channel
         self.__autogain = False
         self.__connected = False
-        i2c_instance = I2C()
-        self.tca = TCA9548A(i2c=i2c_instance)
-        self.__Bus = TCA9548A_Channel(self.tca, channel=channel)
-        self.__channel = channel
-        # self.__Bus = tcagcc
-        try:
-            self.__Bus.try_lock()
-            self.__Bus.writeto(self.__addr, b'\x80')            # Test write
-        except OSError:
-            print("Failed to connect to device with I2C address 0x{:02x}".format(self.__addr))
-            return
-        self.deinit()
-        self.__write_register(TCSREG_ENABLE, TCSCMD_POWER_ON | TCSCMD_AEN)
-        sleep_ms(5)
-        self.__id = self.__read_register(TCSREG_ID)
-        self.__connected = True
-        if not self.__id in TCS3472x_dict.keys():
-            print("Failed to detect supported color sensor")
-            print("Expected ID {:#X} ({:s}) or {:#X} ({:s}), received {:#02X} : {:s}".format(
-                    TCS34725_ID, TCS3472x_dict[TCS34725_ID],
-                    TCS34727_ID, TCS3472x_dict[TCS34727_ID],
-                    self.__id, self.device_type))
-            return
-        print("Connected {:s} at address 0x{:02x}".format(self.device_type, self.__addr))
-        self.gain = TCSGAIN_LOW
-        self.integ = TCSINTEG_MEDIUM
-
-    def deinit(self):
-        self.__Bus.unlock()
-    
-    def switch_channel(self, chan=None):
-        if chan in range(1, 3): 
-            self.channel = chan
-            print("changed to Channel: ", chan)
-        current_channel = self.channel
-        if current_channel == 3 and chan == None:
-            self.channel = 1
-            print("changed to Channel: ", chan)
-        else:
-            self.channel = chan
-            print("changed to Channel: ", chan)
         
-        self.__Bus.reinit(channel=self.channel if self.channel is not None else 1)
+        # Create or store the provided I2C instance
+        if i2c is None:
+            # Create a default I2C instance if none provided
+            self.i2c = MyI2C(freq=freq)
+        else:
+            self.i2c = i2c
+        try:
+            # Select the multiplexer channel
+            self.i2c.writeto(0x70, bytearray([1 << self.__channel]))
+            sleep_ms(5)
+            # Try to communicate with the sensor (address | command bit)
+            self.i2c.writeto(self.__addr, b'\x80')
+            self.i2c.readfrom_into(self.__addr, self.__buf1)
+            self.__id = self.__buf1[0]
+            # Validate the device ID
+            if not self.__id in TCS3472x_dict.keys():
+                print(f"Failed to detect supported color sensor on channel {channel}")
+                print(f"Expected ID {TCS34725_ID:#X} ({TCS3472x_dict[TCS34725_ID]}) or "
+                    f"{TCS34727_ID:#X} ({TCS3472x_dict[TCS34727_ID]}), "
+                    f"received {self.__id:#02X}")
+                return
+            self.__connected = True    
+            print(f"Connected {self.device_type} at address 0x{self.__addr:02x} on channel {channel}")
+            # Initialize the sensor
+            self.__write_register(TCSREG_ENABLE, TCSCMD_POWER_ON | TCSCMD_AEN)
+            sleep_ms(5)
+            
+            # Set default values
+            self.gain = TCSGAIN_LOW
+            self.integ = TCSINTEG_MEDIUM
+        except Exception as e:
+            print(f"Error initializing TCS34725 on channel {channel}: {e}")
+
+
+    def switch_channel(self, chan=None):
+        """Switch to a different multiplexer channel"""
+        if chan is not None and 0 <= chan <= 7 and self.i2c is not None:
+            self.__channel = chan
+            try:
+                # Reinitialize the bus with the new channel
+                self.i2c.writeto(0x70, bytearray([1 << chan]))
+            except Exception as e:
+                print(f"Error switching to channel {chan}: {e}")
+        return self.__channel
 
     def __read_register(self, reg):
         """ read register <reg>, return integer value """
         try:
-            self.__Bus.readfrom_mem_into(self.__addr, TCSCMD_ADDRESS | reg, self.__buf1)
+            # Select channel using the switch_channel method for consistency
+            self.switch_channel(self.__channel)
+            # Use readfrom_mem_into for more efficient reading
+            # Command bit (MSB=1) must be set for all register access per datasheet p.9
+            # Ensure we're passing positional args only, no keyword args
+            self.i2c.readfrom_mem_into(self.__addr, reg | 0x80, self.__buf1)
             return self.__buf1[0]
         except Exception as err:
-            print("I2C read_register error:", err)
+            print(f"I2C read_register error at channel {self.__channel}, reg {reg:#x}: {err}")
             return -1
     
     def __write_register(self, reg, data):
         """ write register """
         self.__buf1[0] = data
         try:
-            self.__Bus.writeto_mem(self.__addr, TCSCMD_ADDRESS | reg, self.__buf1)
+            # Select channel using the switch_channel method for consistency
+            self.switch_channel(self.__channel)
+            # Use writeto_mem for more efficient writing
+            # Command bit (MSB=1) must be set for all register access per datasheet p.9
+            # Ensure we're passing positional args only, no keyword args
+            self.i2c.writeto_mem(self.__addr, reg | 0x80, self.__buf1)
         except Exception as err:
-            print("I2C write_byte error:", err)
+            print(f"I2C write_register error at channel {self.__channel}, reg {reg:#x}: {err}")
             return False
         return True
     
     def __read_alldata(self):
         """ read all counts (8 contigguous data registers) into local buffer """
         try:
-            self.__Bus.readfrom_mem_into(self.__addr, TCSCMD_ADDRESS | TCSREG_ALLDATA, self.__buf8)
+            # Select channel using the switch_channel method for consistency
+            self.switch_channel(self.__channel)
+            # Use readfrom_mem_into for more efficient reading of all data
+            # Command bit (MSB=1) must be set for all register access per datasheet p.9
+            self.i2c.readfrom_mem_into(self.__addr, TCSREG_ALLDATA | 0x80, self.__buf8)
             return self.__buf8
         except Exception as err:
-            print("I2C read all data error:", err)
+            print(f"I2C read_alldata error at channel {self.__channel}: {err}")
+            return None
 
     def __adjustgain_one_step(self, counts):
         """ adjust gain (if possible!) when a certain count limits are reached:
@@ -272,18 +292,39 @@ class TCS34725:
         blue  = self.__buf8[7] << 8 | self.__buf8[6]
         return (red, green, blue, clear)
 
-    def read_all(self, addr, lenght, stop=False):
-        stop = stop or False
-        self.__Bus.readfrom_mem(addr, 0x00, 16)
-        pass
+    def read_all(self, addr, length):
+        """Read data from the device."""
+        try:
+            # Select channel using the switch_channel method for consistency
+            self.switch_channel(self.__channel)
+            return self.i2c.readfrom_mem(addr, 0x00, length)
+        except Exception as err:
+            print(f"I2C read_all error at channel {self.__channel}: {err}")
+            return None
     
     def write(self, data):
-        self.__Bus.write(data)
+        """Write data directly to the bus (after selecting channel)."""
+        try:
+            # Select channel using the switch_channel method for consistency
+            self.switch_channel(self.__channel)
+            # Pass data through to i2c instance
+            return self.i2c.write(data)
+        except Exception as err:
+            print(f"I2C write error at channel {self.__channel}: {err}")
+            return False
     
-    def writeto(self, addr, data, stop=False):
-        stop = stop or False
-        self.__Bus.writeto(addr, data, stop)
+    def writeto(self, addr, data):
+        """Write data to a specific address (after selecting channel)."""
+        try:
+            # Select channel using the switch_channel method for consistency
+            self.switch_channel(self.__channel)
+            return self.i2c.writeto(addr, data)
+        except Exception as err:
+            print(f"I2C writeto error at channel {self.__channel}, addr {addr:#x}: {err}")
+            return False
     
     def start(self):
-        self.writeto(0x00, 0x01)
+        """Start the device by enabling power and ADC."""
+        # Use the constants instead of hardcoded values
+        return self.__write_register(TCSREG_ENABLE, TCSCMD_POWER_ON | TCSCMD_AEN)
 

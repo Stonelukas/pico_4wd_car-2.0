@@ -1,4 +1,4 @@
-from motor import Motor
+from classes.motor import Motor
 import time
 
 left_front  = Motor(17, 16, dir=-1)

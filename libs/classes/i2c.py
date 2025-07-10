@@ -1,10 +1,10 @@
 from machine import Pin, SoftI2C
-from helper import Lockable
+from classes.lock import Lockable
 from micropython import const
 
 DEFAULT_FREQ = const(400000)        # I2C default baudrate
 
-class I2C(Lockable):
+class MyI2C(Lockable):
     """ I2C class
         Create an I2C instance.
         <addr> is I2C address.
@@ -16,9 +16,7 @@ class I2C(Lockable):
     def __init__(self, freq=DEFAULT_FREQ): 
         self.__buf1 = bytearray(1)                    # one-byte buffer
         self.__connected = False
-        self.scl = 3
-        self.sda = 4
-        self.__Bus = SoftI2C(scl=self.scl, sda=self.sda, freq=freq)
+        self.__Bus = SoftI2C(scl=Pin(3), sda=Pin(4), freq=freq)
 
     def connect(self, addr):
         self.__Bus.writeto(addr, b'\x80')
@@ -55,6 +53,35 @@ class I2C(Lockable):
     
     def readfrom_into(self, addr, buffer):
         return self.__Bus.readfrom_into(addr, buffer, stop=True)
+    
+    def readfrom_mem_into(self, addr, memaddr, buffer):
+        """Read from memory into buffer."""
+        try:
+            # Use positional arguments only
+            return self.__Bus.readfrom_mem_into(addr, memaddr, buffer)
+        except Exception as err:
+            print(f"I2C readfrom_mem_into error: {err}")
+            return False
+    
+    def readfrom_mem(self, addr, memaddr, length):
+        """Read from memory and return bytes."""
+        try:
+            # Use positional arguments only
+            return self.__Bus.readfrom_mem(addr, memaddr, length)
+        except Exception as err:
+            print(f"I2C readfrom_mem error: {err}")
+            return None
+    
+    def writeto_mem(self, addr, memaddr, buffer):
+        """Write to memory."""
+        try:
+            # Use positional arguments only
+            return self.__Bus.writeto_mem(addr, memaddr, buffer)
+        except Exception as err:
+            print(f"I2C writeto_mem error: {err}")
+            return False
+    
+
 
     @property
     def isconnected(self):
@@ -75,7 +102,9 @@ class I2C(Lockable):
     def writeto(self, addr, buffer):
         if isinstance(buffer, str):
             buffer = bytes([ord(x) for x in buffer])
-        self.__Bus.writeto(addr, buffer, stop=True)
+        # Some implementations don't accept keyword arguments
+        # Use positional arguments only
+        self.__Bus.writeto(addr, buffer)
     
     def start(self):
         self.writeto(0x00, 0x01)
