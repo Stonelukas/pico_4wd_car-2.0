@@ -9,14 +9,14 @@ from classes.mux import TCA9548A
 from classes.i2c import MyI2C
 
 class Follow:
-    def __init__(self, Left_channel, Middle_channel, Right_channel, target_rgb):
+    def __init__(self, target_rgb):
         print("Starting tcs34735")
         self.i2c_instance = MyI2C()
 
         # Initialize sensors with proper channel values and shared I2C instance
-        self.left_sensor = TCS34725(Left_channel, i2c=self.i2c_instance)
-        self.middle_sensor = TCS34725(Middle_channel, i2c=self.i2c_instance)
-        self.right_sensor = TCS34725(Right_channel, i2c=self.i2c_instance)
+        self.left_sensor = TCS34725(scl=2, sda=3)
+        self.middle_sensor = TCS34725(scl=4, sda=5)
+        self.right_sensor = TCS34725(scl=6, sda=7)
 
         # Set default gain and integration time for each sensor
         self.left_sensor.gain = TCSGAIN_LOW # Low gain
@@ -31,8 +31,7 @@ class Follow:
         self.color_threshold = 60  # Adjust this value as needed
         self.line_out_time = 0  # Track when line was lost
 
-    def _read_sensor(self, sensor, channel):
-        sensor.switch_channel(channel)
+    def _read_sensor(self, sensor):
         return sensor.color_raw[:3] # (R, G, B)
     
     @property
@@ -50,9 +49,9 @@ class Follow:
 
     def get_line_position(self):
         """Determine the position of the line based on sensor readings."""
-        left_color = self._read_sensor(self.left_sensor, 1)
-        middle_color = self._read_sensor(self.middle_sensor, 2)
-        right_color = self._read_sensor(self.right_sensor, 3)
+        left_color = self._read_sensor(self.left_sensor)
+        middle_color = self._read_sensor(self.middle_sensor)
+        right_color = self._read_sensor(self.right_sensor)
 
         left_distance = self._color_distance(left_color, self.target_rgb)
         middle_distance = self._color_distance(middle_color, self.target_rgb)
@@ -79,7 +78,7 @@ class Follow:
 
     def get_color(self):
         """Get the detected color from the middle sensor."""
-        middle_color = self._read_sensor(self.middle_sensor, 2)
+        middle_color = self._read_sensor(self.middle_sensor)
         print(f"Detected color: {middle_color}")
         return middle_color 
 
