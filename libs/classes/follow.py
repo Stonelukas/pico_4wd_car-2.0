@@ -1,11 +1,9 @@
 # filepath: libs/classes/follow.py
-import sys
 import time
 from time import sleep
-from machine import Pin
+from helper import debug_print, get_debug
 
 from classes.tcs34725 import *
-from classes.mux import TCA9548A
 from classes.i2c import MyI2C
 
 class Follow:
@@ -48,8 +46,14 @@ class Follow:
         """Calculate the Euclidean distance between two RGB colors."""
         return sum((a -b) ** 2 for a, b in zip(color1, color2)) ** 0.5
 
-    def get_line_position(self):
+    def get_line_position(self, current_mode=None):
         """Determine the position of the line based on sensor readings."""
+        self.current_mode = current_mode
+        
+        # Only execute if we're in line track mode
+        if current_mode != 'line track':
+            return None
+
         left_color = self._read_sensor(self.left_sensor, 1)
         middle_color = self._read_sensor(self.middle_sensor, 2)
         right_color = self._read_sensor(self.right_sensor, 3)
@@ -58,15 +62,24 @@ class Follow:
         middle_distance = self._color_distance(middle_color, self.target_rgb)
         right_distance = self._color_distance(right_color, self.target_rgb)
 
-        print(f"Left: {left_color}, Middle: {middle_color}, Right: {right_color}")
-        print(f"Distances - Left: {left_distance}, Middle: {middle_distance}, Right: {right_distance}")
+        # Check if debug mode is enabled to decide whether to print
+        is_debug = get_debug() and self.current_mode == 'line track'
+        if is_debug:
+            debug_print((f"Left: {left_color}, Middle: {middle_color}, Right: {right_color}"), 
+                        action="line_track", msg='Color Readings')
+            debug_print((f"Distances - Left: {left_distance}, Middle: {middle_distance}, Right: {right_distance}"), 
+                        action="line_track", msg='Distance Values')
         # Determine which sensor is closest to the target color
 
         # If all sensors are too far from the target color, return None
         if (left_distance > self.color_threshold and
             middle_distance > self.color_threshold and
             right_distance > self.color_threshold):
-            print("No target color detected by any sensor!")
+            if is_debug:
+                debug_print("No target color detected by any sensor!", 
+                          action="line_track", msg="Warning")
+            else:
+                print("No target color detected by any sensor!")
             return None
 
         min_dist = min(left_distance, middle_distance, right_distance)
@@ -75,63 +88,116 @@ class Follow:
         elif min_dist == right_distance:
             return "right"
         else:
-            return "center"
+            return "forward"
 
-    def get_color(self):
+    def get_color(self, current_mode=None):
         """Get the detected color from the middle sensor."""
+        self.current_mode = current_mode
+        
+        # Only proceed if we're in line track mode
+        if current_mode != 'line track':
+            return (0, 0, 0)  # Return black if not in line track mode
+            
         middle_color = self._read_sensor(self.middle_sensor, 2)
-        print(f"Detected color: {middle_color}")
-        return middle_color 
+        if get_debug() and current_mode == 'line track':
+            debug_print(f"Detected color: {middle_color}", action="line_track", msg="Color Detection")
+        return middle_color
 
-    def color_match(self, color):
+    def color_match(self, color, current_mode=None):
         """Check if the detected color matches the target color."""
+        self.current_mode = current_mode
+        
+        # Only perform color matching if we're in line track mode
+        # or checking for color match in the dashboard
+        if current_mode != 'line track':
+            return int(0)  # Return no match if not in line track mode
+            
         distance = self._color_distance(color, self.target_rgb)
-        print(f"Color: {color}, Target: {self.target_rgb}, Distance: {distance}")
+        
+        # Only debug print if we're in debug mode AND in line track mode
+        if get_debug() and current_mode == 'line track':
+            if distance < self.color_threshold:
+                debug_print(f"Color match found: {color} is close to target {self.target_rgb}, Distance: {distance}",
+                          action="line_track", msg="Color Matching")
+            else:
+                debug_print(f"Color match not found: {color} is not close to target {self.target_rgb}, Distance: {distance}",
+                          action="line_track", msg="Color Matching")
+        
         if distance < self.color_threshold:
             match = int(1)
         else:
             match = int(0)
         return match
 
-    def follow_line(self, power):
-        """Follow the line based on sensor readings."""
+    def follow_line(self, power, current_mode=None):
+        """Follow the line based on sensor readings.
+        
+        This function should be called from main.py to follow a colored line.
+        It will use the debug flag to determine whether to actually move the motors
+        or just print debug information.
+        
+        Args:
+            power: Motor power level (0-100)
+            current_mode: Current operating mode of the car
+            
+        Returns:
+            The current move_status value ('left', 'right', 'forward', 'stop')
+        """
+        self.current_mode = current_mode
+        
+        # Only execute if we're actually in line track mode
+        if current_mode != 'line track':
+            return None
+            
         from motors import move, stop
         
-        while True:
-            position = self.get_line_position()
+        position = self.get_line_position(current_mode)
+        is_debug = get_debug() and current_mode == 'line track'
+        move_status = 'unknown'
+        
+        # Check if no line is detected
+        if position is None:
+            # If the car is out of the line, stop it
+            if self.line_out_time == 0:
+                self.line_out_time = time.time()
+                print("Warning: No target color detected by any sensor!")
             
-            # Check if no line is detected
-            if position is None:
-                # If the car is out of the line, stop it
-                if self.line_out_time == 0:
-                    self.line_out_time = time.time()
-                    print("Warning: No target color detected by any sensor!")
-                
-                # If no line detected for more than 2 seconds, stop and wait
-                if (time.time() - self.line_out_time > 2):
-                    print("Line lost! Stopping car. Please reposition the car on the line.")
-                    stop()
-                    # Wait for user intervention - the car will stay stopped
-                    # until the line is found again or the user takes action
-                    while self.get_line_position() is None:
-                        sleep(0.5)
-                        print("Waiting for line to be detected...")
-                    print("Line detected again! Resuming...")
-                    self.line_out_time = 0
-                return
-            else:
-                # Reset the timer if line is detected
+            # If no line detected for more than 2 seconds, stop and wait
+            if (time.time() - self.line_out_time > 2):
+                print("Line lost! Stopping car. Please reposition the car on the line.")
+                stop()
+                position = 'stop'
+                # Print debug information
+                if is_debug:
+                    position = "stopped"
+                    power = 0
+                    debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Stopping line following")
+                # Wait for user intervention - the car will stay stopped
+                # until the line is found again or the user takes action
+                while self.get_line_position() is None:
+                    sleep(0.5)
+                    print("Waiting for line to be detected...")
+                print("Line detected again! Resuming...")
                 self.line_out_time = 0
-            
-            # Execute movement based on line position
-            if position == "left":
-                print("Turning left")
-                move("left", power)
-            elif position == "right":
-                print("Turning right")
-                move("right", power)
+            return position
+        else:
+            # Reset the timer if line is detected
+            self.line_out_time = 0
+        # Execute movement based on line position
+        if position == "left":
+            if is_debug:
+                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
             else:
-                print("Moving forward")
+                move("left", power)
+        elif position == "right":
+            if is_debug:
+                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
+            else:
+                move("right", power)
+        else:
+            if is_debug:
+                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
+            else:
                 move("forward", power)
-            # Small delay to avoid overwhelming the motors
-            sleep(0.1)
+        # Small delay to avoid overwhelming the motors
+        sleep(0.1)

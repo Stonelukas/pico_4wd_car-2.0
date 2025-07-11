@@ -16,7 +16,7 @@ class MyI2C(Lockable):
     def __init__(self, freq=DEFAULT_FREQ): 
         self.__buf1 = bytearray(1)                    # one-byte buffer
         self.__connected = False
-        self.__Bus = SoftI2C(scl=Pin(3), sda=Pin(4), freq=freq)
+        self.__Bus = SoftI2C(sda=Pin(2), scl=Pin(3), freq=freq)
 
     def connect(self, addr):
         self.__Bus.writeto(addr, b'\x80')
@@ -91,10 +91,16 @@ class MyI2C(Lockable):
     def scan(self) -> list:
         return self.__Bus.scan()
         
-    def read_all(self, addr, lenght, stop=False):
-        stop = stop or False
-        self.__Bus.readfrom_mem(addr, 0x00, 16)
-        pass
+    def read_all(self, addr, length, stop=False):
+        """
+        Read 'length' bytes from device at 'addr' starting from register 0x00.
+        Returns the bytes read.
+        """
+        try:
+            return self.__Bus.readfrom_mem(addr, 0x00, length)
+        except Exception as err:
+            print(f"I2C read_all error: {err}")
+            return None
     
     def write(self, data):
         self.__Bus.write(data)

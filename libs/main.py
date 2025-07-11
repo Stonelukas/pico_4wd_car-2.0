@@ -15,7 +15,7 @@ import machine as machine
 import motors as car
 import sonar as sonar
 import lights as lights
-from helper import *
+from helper import set_debug, get_debug, debug_print, print_once
 from classes.speed import Speed
 from classes.grayscale import Grayscale
 from ws import WS_Server
@@ -115,7 +115,7 @@ voice_max_time = 0
 led_status = False
 start = False
 _start_printed = False
-debug = False
+debug = set_debug(False) # global debug flag
 debug_printed = False
 prev_modes = {'M': False, 'N': False, 'O': False, 'P': False} # previous mode state for negative edge detection
 
@@ -191,17 +191,6 @@ def print_follow():
 def print_color_line_track():
     print(" Line Track Mode Enabled \r \n")
     
-@print_on_change
-def debug_print(*data, action=None, msg="Debug data"):
-    """Print debug messages if debug mode is enabled."""
-    global debug
-    if action == None:
-        action = ''
-    else:
-        action = f"[{action}]"
-    if debug:
-        print(f" {msg}: {action} - {data}\r \n")
-        # time.sleep(1)  # Add a small delay to avoid flooding the output
 
 '''----------------- motors fuctions ---------------------'''
 def my_car_move(throttle_power, steer_power, gradually=False):
@@ -215,10 +204,14 @@ def my_car_move(throttle_power, steer_power, gradually=False):
         power_l = int(throttle_power)
         power_r = int((100 - 2*steer_sensitivity*steer_power)/100*throttle_power)
 
-    if not debug and gradually:
+    if not get_debug() and gradually:
         car.set_motors_power_gradually([power_l, power_r, power_l, power_r])
     else:
-        car.set_motors_power([power_l, power_r, power_l, power_r])
+        if get_debug():
+            debug_print((f"Would move motors: [{power_l}, {power_r}, {power_l}, {power_r}]"),
+                        action="motors", msg="Motor Power")
+        else:
+            car.set_motors_power([power_l, power_r, power_l, power_r])
 
 
 '''------- get_dir (sonar sacn data to direction) ---------------------'''
@@ -249,18 +242,55 @@ def get_dir(sonar_data, split_str="0"):
         return "forward"
 
 '''----------------- color_line_track ---------------------'''
-def color_line_track():
+def color_line_track(rgb=None):
+    """Track a colored line using the color sensors.
+    
+    Args:
+        rgb: Optional tuple of (R, G, B) values for the line color.
+             If not provided, the default target color will be used.
+    
+    Returns:
+        None
+    """
     global move_status
+    
+    # Only execute if we're actually in line track mode
+    if mode != 'line track':
+        return
+        
     # Example: channels 1, 2, 3 and a red line (adjust as needed)
-    # You may want to move this instantiation outside the function for efficiency
-    target_rgb = (255, 0, 0)  # Set this to your line color
+    target_rgb = rgb or (255, 0, 0)  # Default to red if no color is provided
+    
+    # Update the target color to track
     sensors.target_color = target_rgb
-    move_status = sensors.follow_line(power=LINE_TRACK_POWER)
+    
+    # Get the car's movement direction from the follow_line function
+    # Pass the current mode to ensure debug prints only happen in line_track mode
+    new_move_status = sensors.follow_line(power=LINE_TRACK_POWER, current_mode=mode)
+    
+    # Only update move_status if we got a valid status
+    if new_move_status is not None:
+        move_status = new_move_status
+
+def auto_color_line_track():
+    """ Scan for a Color on the middle Sensor and use that as the Target RGB to follow. """
+    global move_status
+    
+    # Only execute if we're actually in line track mode
+    if mode != 'line track':
+        return
+
+    target_rgb = sensors.get_color(current_mode=mode)
+    if get_debug():
+        debug_print(f"Auto-tracking color: {target_rgb}", action="line_track", msg="Auto Color Track")
+    color_line_track(target_rgb)
 
 '''----------------- obstacle_avoid ---------------------'''
 def obstacle_avoid():
     global sonar_angle, sonar_distance, avoid_proc, avoid_has_obstacle
     global move_status
+
+    is_debug = get_debug()
 
     # scan
     if avoid_proc == 'scan':
@@ -268,7 +298,7 @@ def obstacle_avoid():
             
             sonar.set_sonar_scan_config(OBSTACLE_AVOID_SCAN_ANGLE, OBSTACLE_AVOID_SCAN_STEP)
             move_status = 'forward'
-            if not debug:
+            if not is_debug:
                 car.move('forward', OBSTACLE_AVOID_FORWARD_POWER)
             else:
                 debug_print(("Direction:", move_status, "Obstacle Avoid Forward Power", OBSTACLE_AVOID_FORWARD_POWER), "Action", msg='Obstacle Avoid Direction')
@@ -296,13 +326,13 @@ def obstacle_avoid():
         avoid_has_obstacle = True
         move_status = 'stop'
         car.move('stop')
-        if debug:
+        if is_debug:
             debug_print(("Direction:", move_status, "Distance:", sonar_distance, "Obstacle Avoid Forward Power", OBSTACLE_AVOID_FORWARD_POWER), action=mode, msg='Obstacle Avoid Direction')
         avoid_proc = 'scan'
     elif avoid_proc == 'forward':
         avoid_has_obstacle = False
         move_status = 'forward'
-        if not debug:
+        if not is_debug:
             car.move('forward', OBSTACLE_AVOID_FORWARD_POWER)
         else:
             debug_print(("Direction:", move_status, sonar_distance, "Obstacle Avoid Forward Power", OBSTACLE_AVOID_FORWARD_POWER), action=mode, msg='Obstacle Avoid Direction')
@@ -311,14 +341,14 @@ def obstacle_avoid():
         avoid_has_obstacle = True
         if avoid_proc == 'left':
             move_status = 'left'
-            if not debug:
+            if not is_debug:
                 car.move('left', OBSTACLE_AVOID_TURNING_POWER)
             else:
                 debug_print(("Direction:", move_status, sonar_distance, "Obstacle Avoid Turning Power", OBSTACLE_AVOID_TURNING_POWER), action=mode, msg='Obstacle Avoid Direction')
             sonar_angle = 20 # servo turn right 20 
         else:
             move_status = 'right'
-            if not debug:
+            if not is_debug:
                 car.move('right', OBSTACLE_AVOID_TURNING_POWER)
             else:
                 debug_print(("Direction:", move_status, sonar_distance, "Obstacle Avoid Turning Power", OBSTACLE_AVOID_TURNING_POWER), action=mode, msg='Obstacle Avoid Direction')
@@ -335,13 +365,14 @@ def obstacle_avoid():
             avoid_has_obstacle = False
             avoid_proc = 'scan'
             move_status = 'forward'
-            if not debug:
+            if not is_debug:
                 car.move("forward", OBSTACLE_AVOID_FORWARD_POWER)
             else:
                 debug_print(("Direction:", move_status, sonar_distance, "Obstacle Avoid Forward Power", OBSTACLE_AVOID_FORWARD_POWER), action=mode, msg='Obstacle Avoid Direction')
             sonar.servo.set_angle(0)
 
 '''----------------- follow ---------------------'''
+# Copilot ignore: Just for reference purposes here.
 def follow():
     global sonar_angle, sonar_distance
     global move_status
@@ -360,28 +391,30 @@ def follow():
     #---- analysis direction -----
     direction = get_dir(sonar_data, split_str='1')
 
+    is_debug = get_debug()
+
     #--------- move ------------
     if direction == "left":
-        if not debug:
+        if not is_debug:
             car.move("left", FOLLOW_TURNING_POWER)
         else:
             debug_print(("Direction:", direction, "Follow Turning Power", FOLLOW_TURNING_POWER), action=mode, msg='Follow Direction')
         move_status = 'left'
     elif direction == "right":
-        if not debug:
+        if not is_debug:
             car.move("right", FOLLOW_TURNING_POWER)
         else:
             debug_print(("Direction:", direction, "Follow Turning Power", FOLLOW_TURNING_POWER), action=mode, msg='Follow Direction')
         move_status = 'right'
     elif direction == "forward":
-        if not debug:
+        if not is_debug:
             car.move("forward", FOLLOW_FORWARD_POWER)
         else:
             debug_print(("Direction:", direction, "Follow Forward Power", FOLLOW_FORWARD_POWER), action=mode, msg='Follow Direction')
         move_status = 'forward'
     else:
         car.move("stop")
-        if debug:
+        if is_debug:
             debug_print(("Direction:", direction, "Follow Forward Power", FOLLOW_FORWARD_POWER), action=mode, msg='Follow Direction')
         move_status = 'stop'
 
@@ -454,10 +487,12 @@ def on_receive(data):
     global current_voice_cmd, voice_start_time, voice_max_time
     global sonar_on
     global anti_fall_enabled
-    global debug, debug_printed, start, prev_modes
+    global debug_printed, start, prev_modes
 
     if RECEIVE_PRINT:
         print("recv_data: %s"%data)
+    
+    # print(f"Received data: {data['A']}")
 
     ''' if not connected, skip & stop '''
     if not ws.is_connected():
@@ -466,8 +501,8 @@ def on_receive(data):
         return
 
     ''' data to display'''
-    # grayscale
-    ws.send_dict['A'] = sensors.color_match(sensors.target_color)
+    # Color track
+    ws.send_dict['A'] = sensors.color_match(sensors.target_color, current_mode=mode) # uint: 0 or 1
     # Speed measurement
     ws.send_dict['B'] = round(speed.get_speed(), 2) # uint: cm/s
     # Speed mileage
@@ -518,14 +553,6 @@ def on_receive(data):
     if throttle_power == 0:
         move_status = 'stop'
 
-    # grayscale reference
-    if 'A' in data.keys() and isinstance(data['A'], list) and start:
-        grayscale.set_edge_reference(data['A'][0])
-        grayscale.set_line_reference(data['A'][1])
-    else:
-        grayscale.set_edge_reference(GRAYSCALE_CLIFF_REFERENCE_DEFAULT)
-        grayscale.set_line_reference(GRAYSCALE_LINE_REFERENCE_DEFAULT)
-
     # rear LEDs brightness
     if throttle_power < 0:
         lights_brightness = (-throttle_power)/100
@@ -546,11 +573,6 @@ def on_receive(data):
             led_theme_code = (led_theme_code + 1) % led_theme_sum
             print(f"set led theme color: {led_theme_code}, {led_theme[str(led_theme_code)][0]}")
 
-    # enable sonar_sacn in normal mode
-    # if 'G' in data.keys() and data['M'] == True:
-    #     sonar_on = True
-    # else:
-    #     sonar_on = False
 
     # mode select: None / Anti fall / Line Track / Obstacle Avoid / Follow
     if start:
@@ -572,22 +594,34 @@ def on_receive(data):
                     mode = 'anti fall'
                     if not prev['M']:
                         print(f"change mode to: {mode}")
+                        # Stop the car when changing modes
+                        car.move('stop')
+                        move_status = 'stop'
             elif n_on:
                 if mode != 'line track':
                     mode = 'line track'
                     if not prev['N']:
                         print(f"change mode to: {mode}")
+                        # Stop the car when changing modes
+                        car.move('stop')
+                        move_status = 'stop'
             elif o_on:
                 if mode != 'obstacle avoid':
                     mode = 'obstacle avoid'
                     sonar.set_sonar_reference(OBSTACLE_AVOID_REFERENCE)
                     if not prev['O']:
                         print(f"change mode to: {mode}")
+                        # Stop the car when changing modes
+                        car.move('stop')
+                        move_status = 'stop'
             elif p_on:
                 if mode != 'follow':
                     mode = 'follow'
                     if not prev['P']:
                         print(f"change mode to: {mode}")
+                        # Stop the car when changing modes
+                        car.move('stop')
+                        move_status = 'stop'
             # Only set to default if a mode was previously on and now all are off and mode is not None
             elif any_prev_on and all_now_off and mode is not None:
                 print("All modes turned off, switching to default mode")
@@ -600,20 +634,8 @@ def on_receive(data):
             print("Connection Lost.")
 
     # Debug mode - Only Print Actions
-    if 'I' in data.keys() and start:
-        if data['I'] == True:
-            if not debug:
-                debug = True
-                # Print once to indicate debug mode is enabled
-                global debug_printed
-                if not debug_printed:
-                    debug_printed = True
-                    print("Debug mode enabled")
-        else:
-            if debug:
-                debug = False
-                debug_printed = False
-                print("Debug mode disabled")
+    if 'I' in data.keys() and start and isinstance(data['I'], bool):
+        set_debug(data['I'])
 
             
     # if 'G' in data.keys() and data['G']:
@@ -691,6 +713,8 @@ def remote_handler():
     if not dpad_touched and mode != 'anti fall':
         if mode == 'line track':
             print_color_line_track()
+            # Only call color_line_track if we're actually in line track mode
+            # The function will handle checking mode internally too
             color_line_track()
         elif mode == 'obstacle avoid':
             print_obstacle_avoid()
