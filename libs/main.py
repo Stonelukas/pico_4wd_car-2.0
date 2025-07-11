@@ -93,8 +93,8 @@ VOICE_CONTROL_POWER = 50
 '''Configure the power of the line_track mode'''
 LINE_TRACK_POWER = 80
 
-'''Configure singal light'''
-singal_on_color = [255, 255, 0] # amber:[255, 191, 0]
+'''Configure signal light'''
+signal_on_color = [255, 255, 0] # amber:[255, 191, 0]
 brake_on_color = [255, 0, 0] 
 
 '''------------ Configure Voice Control Commands -------------'''
@@ -249,13 +249,20 @@ def get_dir(sonar_data, split_str="0"):
         return "forward"
 
 '''----------------- color_line_track ---------------------'''
-def color_line_track():
+def color_line_track(rgb=None):
     global move_status
     # Example: channels 1, 2, 3 and a red line (adjust as needed)
     # You may want to move this instantiation outside the function for efficiency
-    target_rgb = (255, 0, 0)  # Set this to your line color
+    target_rgb = rgb or (255, 0, 0) # Set this to your line color
     sensors.target_color = target_rgb
     move_status = sensors.follow_line(power=LINE_TRACK_POWER)
+
+def auto_color_line_track():
+    """ Scan for a Color on the middle Sensor and use that as the Target RGB to follow. """
+    global move_status
+
+    target_rgb = sensors.get_color()
+    color_line_track(target_rgb)
 
 '''----------------- obstacle_avoid ---------------------'''
 def obstacle_avoid():
@@ -400,14 +407,14 @@ def singal_lights_handler():
     # Set the signal lights based on move_status and blink state
     if move_status == 'left':
         if signal_blink_state:
-            lights.set_rear_left_color(singal_on_color)
+            lights.set_rear_left_color(signal_on_color)
         else:
             lights.set_rear_left_color(0x000000)
         lights.set_rear_right_color(0x000000)
     elif move_status == 'right':
         lights.set_rear_left_color(0x000000)
         if signal_blink_state:
-            lights.set_rear_right_color(singal_on_color)
+            lights.set_rear_right_color(signal_on_color)
         else:
             lights.set_rear_right_color(0x000000)
     else:

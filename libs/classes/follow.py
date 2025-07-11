@@ -5,18 +5,17 @@ from time import sleep
 from machine import Pin
 
 from classes.tcs34725 import *
-from classes.mux import TCA9548A
 from classes.i2c import MyI2C
 
 class Follow:
     def __init__(self, target_rgb):
-        print("Starting tcs34735")
+        print("Starting tcs34725")
         self.i2c_instance = MyI2C()
 
         # Initialize sensors with proper channel values and shared I2C instance
-        self.left_sensor = TCS34725(scl=2, sda=3)
-        self.middle_sensor = TCS34725(scl=4, sda=5)
-        self.right_sensor = TCS34725(scl=6, sda=7)
+        self.left_sensor = TCS34725(scl=Pin(2), sda=Pin(3))
+        self.middle_sensor = TCS34725(scl=Pin(4), sda=Pin(5))
+        self.right_sensor = TCS34725(scl=Pin(6), sda=Pin(7))
 
         # Set default gain and integration time for each sensor
         self.left_sensor.gain = TCSGAIN_LOW # Low gain
@@ -46,6 +45,7 @@ class Follow:
     def _color_distance(self, color1, color2):
         """Calculate the Euclidean distance between two RGB colors."""
         return sum((a -b) ** 2 for a, b in zip(color1, color2)) ** 0.5
+
 
     def get_line_position(self):
         """Determine the position of the line based on sensor readings."""

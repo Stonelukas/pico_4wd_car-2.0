@@ -78,7 +78,7 @@ class TCS34725:
         # Create or store the provided I2C instance
         if i2c is None:
             # Create a default I2C instance if none provided
-            self.i2c = MyI2C(freq=freq)
+            self.i2c = MyI2C(freq=freq) # type: ignore
         else:
             self.i2c = i2c
         try:
@@ -150,7 +150,7 @@ class TCS34725:
         return True
     
     def __read_alldata(self):
-        """ read all counts (8 contigguous data registers) into local buffer """
+        """ read all counts (8 contiguous data registers) into local buffer """
         try:
             # Select channel using the switch_channel method for consistency
             self.switch_channel(self.__channel)
