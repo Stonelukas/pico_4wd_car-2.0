@@ -45,6 +45,56 @@ class Follow:
     def _color_distance(self, color1, color2):
         """Calculate the Euclidean distance between two RGB colors."""
         return sum((a -b) ** 2 for a, b in zip(color1, color2)) ** 0.5
+    
+    def get_colors(self, color_code: str = 'all'):
+        """Get average color values from all three sensors.
+        
+        Args:
+            color_code: Color component to return ('red', 'green', 'blue', 'all', or 'rgb')
+                       Default is 'all' which returns all components as a tuple
+        
+        Returns:
+            float: Average value for single color component
+            tuple: (red, green, blue) tuple when color_code is 'all' or 'rgb'
+            None: If invalid color_code provided
+        """
+        try:
+            # Read all sensors once and store the results
+            left_rgb = self._read_sensor(self.left_sensor, 1)
+            middle_rgb = self._read_sensor(self.middle_sensor, 2)
+            right_rgb = self._read_sensor(self.right_sensor, 3)
+            
+            # Calculate averages for each color component
+            red_avg = sum(rgb[0] for rgb in (left_rgb, middle_rgb, right_rgb)) / 3
+            green_avg = sum(rgb[1] for rgb in (left_rgb, middle_rgb, right_rgb)) / 3
+            blue_avg = sum(rgb[2] for rgb in (left_rgb, middle_rgb, right_rgb)) / 3
+            
+            # Debug output if enabled
+            if get_debug():
+                debug_print(f"Sensor readings - Left: {left_rgb}, Middle: {middle_rgb}, Right: {right_rgb}", 
+                           action="color_sensing", msg="Raw Values")
+                debug_print(f"Averages - Red: {red_avg:.1f}, Green: {green_avg:.1f}, Blue: {blue_avg:.1f}", 
+                           action="color_sensing", msg="Calculated Averages")
+            
+            # Return based on requested color code
+            color_code = color_code.lower()
+            if color_code == 'red':
+                return red_avg
+            elif color_code == 'green':
+                return green_avg
+            elif color_code == 'blue':
+                return blue_avg
+            elif color_code in ('all', 'rgb'):
+                return (red_avg, green_avg, blue_avg)
+            else:
+                raise ValueError(f"Unknown color code: '{color_code}'. Use 'red', 'green', 'blue', 'all', or 'rgb'")
+                
+        except Exception as e:
+        except IOError as e:
+            print(f"IOError reading color sensors: {e}")
+            if get_debug():
+                debug_print(f"Color sensor IOError: {e}", action="color_sensing", msg="Error")
+            return None
 
     def get_line_position(self, current_mode=None):
         """Determine the position of the line based on sensor readings."""
