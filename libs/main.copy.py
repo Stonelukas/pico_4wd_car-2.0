@@ -59,7 +59,7 @@ NAME = 'my_4wd_car'
 # STA Mode
 WIFI_MODE = "sta"
 SSID = "SPE-WLAN"
-PASSWORD = "HeiselAir#1"
+PASSWORD = ""
 
 '''Configure steer sensitivity'''
 steer_sensitivity = 0.8 # 0 ~ 1
@@ -166,6 +166,9 @@ line_out_time = 0
 try:
     speed = Speed(8, 9)
     sensors = Follow(Left_channel=1, Middle_channel=2, Right_channel=3, target_rgb=(255, 0, 0))
+    left_color = sensors.get_color_str()[0]
+    middle_color = sensors.get_color_str()[1]
+    right_color = sensors.get_color_str()[2]
     grayscale = Grayscale(26, 27, 28)
     ws = WS_Server(name=NAME, mode=WIFI_MODE, ssid=SSID, password=PASSWORD)
 except Exception as e:

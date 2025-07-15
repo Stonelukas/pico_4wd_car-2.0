@@ -11,6 +11,9 @@ class Follow:
         print("Starting tcs34735")
         self.i2c_instance = MyI2C()
 
+        self.left_channel = Left_channel
+        self.middle_channel = Middle_channel
+        self.right_channel = Right_channel
         # Initialize sensors with proper channel values and shared I2C instance
         self.left_sensor = TCS34725(Left_channel, i2c=self.i2c_instance)
         self.middle_sensor = TCS34725(Middle_channel, i2c=self.i2c_instance)
@@ -34,14 +37,24 @@ class Follow:
         return sensor.color_raw[:3] # (R, G, B)
     
     @property
-    def target_color(self):
+    def target_color_rgb(self):
         """Get the target color for the line."""
         return self.target_rgb
-
-    @target_color.setter
-    def target_color(self, value):
-        self.target_rgb = value
     
+
+    @target_color_rgb.setter
+    def target_color_rgb(self, value):
+        self.target_rgb = value
+
+    @property
+    def target_color(self):
+        """Get the target color for the line as a string from predefined colors"""
+        return self.__translate_color(self.target_color_rgb, mode='string')
+    
+    @target_color.setter
+    def target_color(self, color):
+        self.target_rgb = self.__translate_color(color, mode='rgb')
+
     def _color_distance(self, color1, color2):
         """Calculate the Euclidean distance between two RGB colors."""
         return sum((a -b) ** 2 for a, b in zip(color1, color2)) ** 0.5
@@ -89,69 +102,100 @@ class Follow:
             else:
                 raise ValueError(f"Unknown color code: '{color_code}'. Use 'red', 'green', 'blue', 'all', or 'rgb'")
                 
-        except Exception as e:
         except IOError as e:
             print(f"IOError reading color sensors: {e}")
             if get_debug():
                 debug_print(f"Color sensor IOError: {e}", action="color_sensing", msg="Error")
             return None
 
-    def get_line_position(self, current_mode=None):
-        """Determine the position of the line based on sensor readings."""
-        self.current_mode = current_mode
-        
-        # Only execute if we're in line track mode
-        if current_mode != 'line track':
-            return None
 
-        left_color = self._read_sensor(self.left_sensor, 1)
+    def __get_color_rgb(self, current_mode=None):
+        """Get the detected color from the middle sensor as RGB."""
+            
         middle_color = self._read_sensor(self.middle_sensor, 2)
-        right_color = self._read_sensor(self.right_sensor, 3)
-
-        left_distance = self._color_distance(left_color, self.target_rgb)
-        middle_distance = self._color_distance(middle_color, self.target_rgb)
-        right_distance = self._color_distance(right_color, self.target_rgb)
-
-        # Check if debug mode is enabled to decide whether to print
-        is_debug = get_debug() and self.current_mode == 'line track'
-        if is_debug:
-            debug_print((f"Left: {left_color}, Middle: {middle_color}, Right: {right_color}"), 
-                        action="line_track", msg='Color Readings')
-            debug_print((f"Distances - Left: {left_distance}, Middle: {middle_distance}, Right: {right_distance}"), 
-                        action="line_track", msg='Distance Values')
-        # Determine which sensor is closest to the target color
-
-        # If all sensors are too far from the target color, return None
-        if (left_distance > self.color_threshold and
-            middle_distance > self.color_threshold and
-            right_distance > self.color_threshold):
-            if is_debug:
-                debug_print("No target color detected by any sensor!", 
-                          action="line_track", msg="Warning")
-            else:
-                print("No target color detected by any sensor!")
-            return None
-
-        min_dist = min(left_distance, middle_distance, right_distance)
-        if min_dist == left_distance:
-            return "left"
-        elif min_dist == right_distance:
-            return "right"
-        else:
-            return "forward"
+        return middle_color
 
     def get_color(self, current_mode=None):
-        """Get the detected color from the middle sensor."""
+        """ detects the color of the middle sensor and returns it as a string."""
         self.current_mode = current_mode
         
         # Only proceed if we're in line track mode
         if current_mode != 'line track':
             return (0, 0, 0)  # Return black if not in line track mode
-            
-        middle_color = self._read_sensor(self.middle_sensor, 2)
+
+        rgb = self.__get_color_rgb
         if get_debug() and current_mode == 'line track':
-            debug_print(f"Detected color: {middle_color}", action="line_track", msg="Color Detection")
-        return middle_color
+            debug_print(f"Detected color: {rgb}", action="line_track", msg="Color Detection")
+        return self.__translate_color(rgb, mode='string')
+
+    def __translate_color(self, rgb, mode):
+        """ 
+        Translates RGB values into strings or strings into RGB values for easy evaluation
+
+
+        purple:     R:111   G:95    B:132
+        blue:       R:61    G:146   B:175
+        green:      R:153   G:182   B:57
+        yellow:     R:229   G:174   B:47
+        orange:     R:232   G:120   B:45
+        terracotta: R:192   G:99    B:81
+
+        Parameters:
+        rgb (tuple): RGB values to evaluate
+        mode (str): Mode of operation, either 'string' to return color name or 'rgb' to return RGB values
+
+        Returns:
+        str or tuple: Color name if mode is 'string', RGB tuple if mode is 'rgb' or empty string if no match found
+        """
+
+        if mode == 'string':
+            if self.__color_compare(rgb, (111, 95, 132)):
+                return "lila"
+            if self.__color_compare(rgb, (61, 146, 175)):
+                return "blau"
+            if self.__color_compare(rgb, (153, 182, 57)):
+                return "grün"
+            if self.__color_compare(rgb, (229, 174, 47)):
+                return "gelb"
+            if self.__color_compare(rgb, (232, 120, 45)):
+                return "orange"
+            if self.__color_compare(rgb, (192, 99, 81)):
+                return "terracotta"
+            else:
+                return ""
+
+        elif mode == 'rgb':
+            if rgb == "lila":
+                return (111, 95, 132)
+            if rgb == "blau":
+                return (61, 146, 175)
+            if rgb == "grün":
+                return (153, 182, 57)
+            if rgb == "gelb":
+                return (229, 174, 47)
+            if rgb == "orange":
+                return (232, 120, 45)
+            if rgb == "terracotta":
+                return (192, 99, 81)
+            else:
+                return (0, 0, 0)
+
+    def get_color_str(self):
+        """
+        Returns:
+        tuple of str: Color that corresponds to the RGB values.
+        (left, middle, right)
+        """
+        left = self.__translate_color(self._read_sensor(self.left_sensor, 1), mode='string')
+        middle = self.__translate_color(self._read_sensor(self.middle_sensor, 2), mode='string')
+        right = self.__translate_color(self._read_sensor(self.right_sensor, 3), mode='string')
+
+        return (left, middle, right)
+
+    def __color_compare(self, color1, color2):
+        """ Compare two colors and return True if they match within the threshold. """
+        threshold = 30  # Define a threshold for color matching
+        return all(abs(c1 - c2) < threshold for c1, c2 in zip(color1, color2))
 
     def color_match(self, color, current_mode=None):
         """Check if the detected color matches the target color."""
@@ -251,3 +295,47 @@ class Follow:
                 move("forward", power)
         # Small delay to avoid overwhelming the motors
         sleep(0.1)
+
+    def get_line_position(self, current_mode=None):
+        """Determine the position of the line based on sensor readings."""
+        self.current_mode = current_mode
+        
+        # Only execute if we're in line track mode
+        if current_mode != 'line track':
+            return None
+
+        left_color = self._read_sensor(self.left_sensor, 1)
+        middle_color = self._read_sensor(self.middle_sensor, 2)
+        right_color = self._read_sensor(self.right_sensor, 3)
+
+        left_distance = self._color_distance(left_color, self.target_rgb)
+        middle_distance = self._color_distance(middle_color, self.target_rgb)
+        right_distance = self._color_distance(right_color, self.target_rgb)
+
+        # Check if debug mode is enabled to decide whether to print
+        is_debug = get_debug() and self.current_mode == 'line track'
+        if is_debug:
+            debug_print((f"Left: {left_color}, Middle: {middle_color}, Right: {right_color}"), 
+                        action="line_track", msg='Color Readings')
+            debug_print((f"Distances - Left: {left_distance}, Middle: {middle_distance}, Right: {right_distance}"), 
+                        action="line_track", msg='Distance Values')
+        # Determine which sensor is closest to the target color
+
+        # If all sensors are too far from the target color, return None
+        if (left_distance > self.color_threshold and
+            middle_distance > self.color_threshold and
+            right_distance > self.color_threshold):
+            if is_debug:
+                debug_print("No target color detected by any sensor!", 
+                          action="line_track", msg="Warning")
+            else:
+                print("No target color detected by any sensor!")
+            return None
+
+        min_dist = min(left_distance, middle_distance, right_distance)
+        if min_dist == left_distance:
+            return "left"
+        elif min_dist == right_distance:
+            return "right"
+        else:
+            return "forward"
