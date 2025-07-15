@@ -49,11 +49,13 @@ class Follow:
     @property
     def target_color(self):
         """Get the target color for the line as a string from predefined colors"""
-        return self.__translate_color(self.target_color_rgb, mode='string')
-    
+        if isinstance(self.target_color_rgb, tuple) and len(self.target_color_rgb) == 3:
+            return self.__translate_color(rgb=self.target_color_rgb, mode='string')
+        return ""
+
     @target_color.setter
     def target_color(self, color):
-        self.target_rgb = self.__translate_color(color, mode='rgb')
+        self.target_rgb = self.__translate_color(color=color, mode='rgb')
 
     def _color_distance(self, color1, color2):
         """Calculate the Euclidean distance between two RGB colors."""
@@ -108,12 +110,24 @@ class Follow:
                 debug_print(f"Color sensor IOError: {e}", action="color_sensing", msg="Error")
             return None
 
-
     def __get_color_rgb(self, current_mode=None):
         """Get the detected color from the middle sensor as RGB."""
             
         middle_color = self._read_sensor(self.middle_sensor, 2)
         return middle_color
+    
+    def get_color_rgb_convert(self):
+        """
+        convert RGB value to a number with 2 numbers before the comma. 
+        The 3 number is after the comma.
+        return as tuple (R, G, B)
+        """
+        rgb = self.__get_color_rgb()
+        # Convert each RGB component to a string with 2 digits before the decimal and 1 after
+        r = f"{rgb[0]:02d}"
+        g = f"{rgb[1]:02d}"
+        b = f"{rgb[2]:02d}"
+        return (r, g, b)
 
     def get_color(self, current_mode=None):
         """ detects the color of the middle sensor and returns it as a string."""
@@ -123,12 +137,10 @@ class Follow:
         if current_mode != 'line track':
             return (0, 0, 0)  # Return black if not in line track mode
 
-        rgb = self.__get_color_rgb
+        rgb = tuple(self.__get_color_rgb())
         if get_debug() and current_mode == 'line track':
             debug_print(f"Detected color: {rgb}", action="line_track", msg="Color Detection")
-        return self.__translate_color(rgb, mode='string')
-
-    def __translate_color(self, rgb, mode):
+    def __translate_color(self, rgb: tuple = (0, 0, 0), color: str = '', mode: str = ''):
         """ 
         Translates RGB values into strings or strings into RGB values for easy evaluation
 
@@ -148,6 +160,10 @@ class Follow:
         str or tuple: Color name if mode is 'string', RGB tuple if mode is 'rgb' or empty string if no match found
         """
 
+        # Ensure rgb is a valid tuple for string mode
+        if mode == 'string' and (not isinstance(rgb, tuple) or len(rgb) != 3):
+            return ""
+
         if mode == 'string':
             if self.__color_compare(rgb, (111, 95, 132)):
                 return "lila"
@@ -164,18 +180,20 @@ class Follow:
             else:
                 return ""
 
-        elif mode == 'rgb':
-            if rgb == "lila":
+        # convert string to lowercase for comparison
+        elif mode == 'rgb' and isinstance(rgb, str):
+            color = color.lower()
+            if color == "lila":
                 return (111, 95, 132)
-            if rgb == "blau":
+            if color == "blau":
                 return (61, 146, 175)
-            if rgb == "grün":
+            if color == "grün":
                 return (153, 182, 57)
-            if rgb == "gelb":
+            if color == "gelb":
                 return (229, 174, 47)
-            if rgb == "orange":
+            if color == "orange":
                 return (232, 120, 45)
-            if rgb == "terracotta":
+            if color == "terracotta":
                 return (192, 99, 81)
             else:
                 return (0, 0, 0)
@@ -186,9 +204,9 @@ class Follow:
         tuple of str: Color that corresponds to the RGB values.
         (left, middle, right)
         """
-        left = self.__translate_color(self._read_sensor(self.left_sensor, 1), mode='string')
-        middle = self.__translate_color(self._read_sensor(self.middle_sensor, 2), mode='string')
-        right = self.__translate_color(self._read_sensor(self.right_sensor, 3), mode='string')
+        left = self.__translate_color(rgb=self._read_sensor(self.left_sensor, 1), mode='string')
+        middle = self.__translate_color(rgb=self._read_sensor(self.middle_sensor, 2), mode='string')
+        right = self.__translate_color(rgb=self._read_sensor(self.right_sensor, 3), mode='string')
 
         return (left, middle, right)
 
