@@ -1,21 +1,34 @@
-# filepath: libs/classes/follow.py
+# filepath: libs/classes/follow_mux.py
 import time
 from time import sleep
-from machine import Pin
+from typing import Optional, Union, Tuple, Any
 from helper import debug_print, get_debug
 
-from classes.tcs34725 import *
+from classes.tcs34725_mux import *
 from classes.i2c import MyI2C
 
 class Follow:
-    def __init__(self, target_rgb):
-        print("Starting tcs34725")
+    def __init__(self, Left_channel: int, Middle_channel: int, Right_channel: int, target_rgb: Tuple[int, int, int]) -> None:
+        """
+        Initialize the Follow class for line tracking with color sensors.
+        
+        Args:
+            Left_channel: I2C multiplexer channel for left color sensor
+            Middle_channel: I2C multiplexer channel for middle color sensor  
+            Right_channel: I2C multiplexer channel for right color sensor
+            target_rgb: Target RGB color to follow (default red)
+        """
+        print("Starting tcs34735")
         self.i2c_instance = MyI2C()
 
+        self.left_channel = Left_channel
+        self.middle_channel = Middle_channel
+        self.right_channel = Right_channel
+        
         # Initialize sensors with proper channel values and shared I2C instance
-        self.left_sensor = TCS34725(scl=Pin(2), sda=Pin(3))
-        self.middle_sensor = TCS34725(scl=Pin(4), sda=Pin(5))
-        self.right_sensor = TCS34725(scl=Pin(6), sda=Pin(7))
+        self.left_sensor = TCS34725(Left_channel, i2c=self.i2c_instance)
+        self.middle_sensor = TCS34725(Middle_channel, i2c=self.i2c_instance)
+        self.right_sensor = TCS34725(Right_channel, i2c=self.i2c_instance)
 
         # Set default gain and integration time for each sensor
         self.left_sensor.gain = TCSGAIN_LOW # Low gain
@@ -25,39 +38,77 @@ class Follow:
         self.middle_sensor.integ = TCSINTEG_MEDIUM
         self.right_sensor.integ = TCSINTEG_MEDIUM
 
-        self.target_rgb = target_rgb # (R, G, B) tuple for the line color
+        # Validate and set target RGB tuple (R, G, B)
+        self.target_rgb = self._validate_rgb(target_rgb)
         print("I2C started")
         self.color_threshold = 60  # Adjust this value as needed
         self.line_out_time = 0  # Track when line was lost
 
-    def _read_sensor(self, sensor):
+        # Color mapping for string conversion
+        self.color_map = {
+            "lila": (111, 95, 132),
+            "blau": (61, 146, 175),
+            "grün": (153, 182, 57),
+            "gelb": (229, 174, 47),
+            "orange": (232, 120, 45),
+            "terracotta": (192, 99, 81)
+        }
+        self.rgb_to_color = {v: k for k, v in self.color_map.items()}
+
+    def _validate_rgb(self, rgb: Tuple[Any, ...]) -> Tuple[int, int, int]:
+        """Validate RGB tuple and ensure it contains exactly 3 integers (R, G, B)."""
+        if not isinstance(rgb, tuple) or len(rgb) != 3:
+            raise ValueError("RGB must be a tuple of exactly 3 values (R, G, B)")
+        
+        # Ensure all values are integers and within valid range (0-255)
+        validated_rgb = []
+        for i, value in enumerate(rgb):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"RGB value at index {i} must be a number")
+            
+            # Convert to int and clamp to 0-255 range
+            int_value = int(value)
+            clamped_value = max(0, min(255, int_value))
+            validated_rgb.append(clamped_value)
+        
+        return tuple(validated_rgb)
+
+    def _read_sensor(self, sensor: Any, channel: int) -> Tuple[int, int, int]:
+        sensor.switch_channel(channel)
         return sensor.color_raw[:3] # (R, G, B)
     
     @property
-    def target_color_rgb(self):
-        """Get the target color for the line."""
+    def target_color_rgb(self) -> Tuple[int, int, int]:
+        """Get the target color for the line as RGB tuple (R, G, B)."""
         return self.target_rgb
-
+    
     @target_color_rgb.setter
-    def target_color_rgb(self, value):
-        self.target_rgb = value
+    def target_color_rgb(self, value: Tuple[int, int, int]) -> None:
+        """Set the target color for the line as RGB tuple (R, G, B)."""
+        self.target_rgb = self._validate_rgb(value)
 
     @property
-    def target_color(self):
+    def target_color(self) -> str:
         """Get the target color for the line as a string from predefined colors"""
         if isinstance(self.target_color_rgb, tuple) and len(self.target_color_rgb) == 3:
-            return self.__translate_color(rgb=self.target_color_rgb, mode='string')
+            result = self.__translate_color(rgb=self.target_color_rgb, mode='string')
+            return result if isinstance(result, str) else ""
         return ""
 
     @target_color.setter
-    def target_color(self, color):
-        self.target_rgb = self.__translate_color(color=color, mode='rgb')
-    
-    def _color_distance(self, color1, color2):
+    def target_color(self, color: str) -> None:
+        """Set the target color using a predefined color name."""
+        rgb_result = self.__translate_color(color=color, mode='rgb')
+        if isinstance(rgb_result, tuple) and len(rgb_result) == 3:
+            self.target_rgb = self._validate_rgb(rgb_result)
+        else:
+            raise ValueError(f"Invalid color name: '{color}'. Must be one of: lila, blau, grün, gelb, orange, terracotta")
+
+    def _color_distance(self, color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> float:
         """Calculate the Euclidean distance between two RGB colors."""
         return sum((a -b) ** 2 for a, b in zip(color1, color2)) ** 0.5
-
-    def get_colors(self, color_code: str = 'all'):
+    
+    def get_colors(self, color_code: str = 'all') -> Optional[Union[float, Tuple[float, float, float]]]:
         """Get average color values from all three sensors.
         
         Args:
@@ -71,9 +122,9 @@ class Follow:
         """
         try:
             # Read all sensors once and store the results
-            left_rgb = self._read_sensor(self.left_sensor)
-            middle_rgb = self._read_sensor(self.middle_sensor)
-            right_rgb = self._read_sensor(self.right_sensor)
+            left_rgb = self._read_sensor(self.left_sensor, 1)
+            middle_rgb = self._read_sensor(self.middle_sensor, 2)
+            right_rgb = self._read_sensor(self.right_sensor, 3)
             
             # Calculate averages for each color component
             red_avg = sum(rgb[0] for rgb in (left_rgb, middle_rgb, right_rgb)) / 3
@@ -105,14 +156,17 @@ class Follow:
             if get_debug():
                 debug_print(f"Color sensor IOError: {e}", action="color_sensing", msg="Error")
             return None
-        
-    def __get_color_rgb(self, current_mode=None):
+
+    def __get_color_rgb(self, current_mode: Optional[str] = None) -> Tuple[int, int, int]:
         """Get the detected color from the middle sensor as RGB."""
+        self.current_mode = current_mode
+        if self.current_mode != 'line track':
+            return (0, 0, 0)
             
-        middle_color = self._read_sensor(self.middle_sensor)
+        middle_color = self._read_sensor(self.middle_sensor, 2)
         return middle_color
     
-    def get_color_rgb_convert(self):
+    def get_color_rgb_convert(self) -> Tuple[str, str, str]:
         """
         convert RGB value to a number with 2 numbers before the comma. 
         The 3 number is after the comma.
@@ -125,19 +179,20 @@ class Follow:
         b = f"{rgb[2]:02d}"
         return (r, g, b)
 
-    def get_color(self, current_mode=None):
-        """ detects the color of the middle sensor and returns it as a string."""
+    def get_color(self, current_mode: Optional[str] = None) -> Tuple[int, int, int]:
+        """ detects the color of the middle sensor and returns it as RGB tuple."""
         self.current_mode = current_mode
         
         # Only proceed if we're in line track mode
         if current_mode != 'line track':
             return (0, 0, 0)  # Return black if not in line track mode
 
-        rgb = tuple(self.__get_color_rgb())
+        rgb = self.__get_color_rgb()
         if get_debug() and current_mode == 'line track':
             debug_print(f"Detected color: {rgb}", action="line_track", msg="Color Detection")
+        return rgb
 
-    def __translate_color(self, rgb: tuple = (0, 0, 0), color: str = '', mode: str = ''):
+    def __translate_color(self, rgb: Tuple[int, int, int] = (0, 0, 0), color: str = '', mode: str = '') -> Union[str, Tuple[int, int, int]]:
         """ 
         Translates RGB values into strings or strings into RGB values for easy evaluation
 
@@ -178,7 +233,7 @@ class Follow:
                 return ""
 
         # convert string to lowercase for comparison
-        elif mode == 'rgb' and isinstance(rgb, str):
+        elif mode == 'rgb' and isinstance(color, str):
             color = color.lower()
             if color == "lila":
                 return (111, 95, 132)
@@ -194,36 +249,59 @@ class Follow:
                 return (192, 99, 81)
             else:
                 return (0, 0, 0)
+        
+        # Default return for unknown modes
+        return ""
 
-    def get_color_str(self):
+    def get_color_str(self) -> Tuple[str, str, str]:
         """
         Returns:
         tuple of str: Color that corresponds to the RGB values.
         (left, middle, right)
         """
-        left = self.__translate_color(rgb=self._read_sensor(self.left_sensor), mode='string')
-        middle = self.__translate_color(rgb=self._read_sensor(self.middle_sensor), mode='string')
-        right = self.__translate_color(rgb=self._read_sensor(self.right_sensor), mode='string')
+        left_result = self.__translate_color(rgb=self._read_sensor(self.left_sensor, 1), mode='string')
+        middle_result = self.__translate_color(rgb=self._read_sensor(self.middle_sensor, 2), mode='string')
+        right_result = self.__translate_color(rgb=self._read_sensor(self.right_sensor, 3), mode='string')
+        
+        # Ensure we return strings (cast to str if needed)
+        left = str(left_result) if isinstance(left_result, str) else ""
+        middle = str(middle_result) if isinstance(middle_result, str) else ""
+        right = str(right_result) if isinstance(right_result, str) else ""
 
         return (left, middle, right)
 
-    def __color_compare(self, color1, color2):
+    def __color_compare(self, color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> bool:
         """ Compare two colors and return True if they match within the threshold. """
         threshold = 30  # Define a threshold for color matching
         return all(abs(c1 - c2) < threshold for c1, c2 in zip(color1, color2))
 
-
-    def color_match(self, color):
+    def color_match(self, color: Tuple[int, int, int], current_mode: Optional[str] = None) -> int:
         """Check if the detected color matches the target color."""
+        self.current_mode = current_mode
+        
+        # Only perform color matching if we're in line track mode
+        # or checking for color match in the dashboard
+        if current_mode != 'line track':
+            return int(0)  # Return no match if not in line track mode
+            
         distance = self._color_distance(color, self.target_rgb)
-        print(f"Color: {color}, Target: {self.target_rgb}, Distance: {distance}")
+        
+        # Only debug print if we're in debug mode AND in line track mode
+        if get_debug() and current_mode == 'line track':
+            if distance < self.color_threshold:
+                debug_print(f"Color match found: {color} is close to target {self.target_rgb}, Distance: {distance}",
+                          action="line_track", msg="Color Matching")
+            else:
+                debug_print(f"Color match not found: {color} is not close to target {self.target_rgb}, Distance: {distance}",
+                          action="line_track", msg="Color Matching")
+        
         if distance < self.color_threshold:
             match = int(1)
         else:
             match = int(0)
         return match
 
-    def follow_line(self, power, curren_mode=None):
+    def follow_line(self, power: int, current_mode: Optional[str] = None) -> Optional[str]:
         """Follow the line based on sensor readings.
         
         This function should be called from main.py to follow a colored line.
@@ -237,19 +315,18 @@ class Follow:
         Returns:
             The current move_status value ('left', 'right', 'forward', 'stop')
         """
-        self.current_mode = curren_mode
+        self.current_mode = current_mode
         
-        # Only proceed if we're in line track mode
+        # Only execute if we're actually in line track mode
         if self.current_mode != 'line track':
             print("Not in line track mode, skipping follow_line.")
             return None
-        
+            
         from motors import move, stop
-
-        position = self.get_line_position(self.current_mode)
-        # Check if debug mode is enabled and we're in line track mode
-        is_debug = get_debug() and self.current_mode == 'line track'
-
+        
+        position = self.get_line_position(current_mode)
+        is_debug = get_debug() and current_mode == 'line track'
+        
         # Check if no line is detected
         if position is None:
             # If the car is out of the line, stop it
@@ -296,8 +373,9 @@ class Follow:
                 move("forward", power)
         # Small delay to avoid overwhelming the motors
         sleep(0.1)
+        return position
 
-    def get_line_position(self, current_mode=None):
+    def get_line_position(self, current_mode: Optional[str] = None) -> Optional[str]:
         """Determine the position of the line based on sensor readings."""
         self.current_mode = current_mode
         
@@ -306,9 +384,9 @@ class Follow:
             print("Not in line track mode, skipping get_line_position.")
             return None
 
-        left_color = self._read_sensor(self.left_sensor)
-        middle_color = self._read_sensor(self.middle_sensor)
-        right_color = self._read_sensor(self.right_sensor)
+        left_color = self._read_sensor(self.left_sensor, 1)
+        middle_color = self._read_sensor(self.middle_sensor, 2)
+        right_color = self._read_sensor(self.right_sensor, 3)
 
         left_distance = self._color_distance(left_color, self.target_rgb)
         middle_distance = self._color_distance(middle_color, self.target_rgb)
@@ -340,4 +418,8 @@ class Follow:
         elif min_dist == right_distance:
             return "right"
         else:
-            return "center"
+            return "forward"
+
+
+if __name__ == '__main__':
+    Sensors = Follow(1, 2, 3, (255, 0, 0))

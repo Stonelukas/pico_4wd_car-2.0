@@ -16,7 +16,7 @@ import motors as car
 from motors import move, stop
 import sonar as sonar
 import lights as lights
-from helper import set_debug, get_debug, debug_print, print_once
+from helper import set_debug, get_debug, debug_print
 from classes.speed import Speed
 from classes.grayscale import Grayscale
 from ws import WS_Server
@@ -120,6 +120,250 @@ sonar_angle = 0
 sonar_distance = 0
 avoid_proc = "scan" # obstacle process, "scan", "getdir", "stop", "forward", "left", "right"
 avoid_has_obstacle = False
+
+class Follow:
+    def __init__(self, Left_channel, Middle_channel, Right_channel, target_rgb=(255, 0, 0)):
+        """
+        Initialize the Follow class for line tracking with color sensors.
+        
+        Args:
+            Left_channel: I2C multiplexer channel for left color sensor
+            Middle_channel: I2C multiplexer channel for middle color sensor  
+            Right_channel: I2C multiplexer channel for right color sensor
+            target_rgb: Target RGB color to follow (default red)
+        """
+        
+        # Initialize I2C and multiplexer
+        self.i2c_instance = MyI2C()
+        self.mux = TCA9548A(self.i2c_instance)
+        
+        # Store channel numbers
+        self.left_channel = Left_channel
+        self.middle_channel = Middle_channel
+        self.right_channel = Right_channel
+        
+        # Initialize color sensors
+        self.left_sensor = TCS34725(i2c=self.i2c_instance)
+        self.middle_sensor = TCS34725(i2c=self.i2c_instance)
+        self.right_sensor = TCS34725(i2c=self.i2c_instance)
+        
+        # Color tracking settings
+        self.target_color = "rot"  # Default target color name
+        self.target_color_rgb = target_rgb
+        
+        # Color mapping for string conversion
+        self.color_map = {
+            "rot": (255, 0, 0),
+            "grün": (0, 255, 0),
+            "blau": (0, 0, 255),
+            "gelb": (255, 255, 0),
+            "lila": (128, 0, 128),
+            "orange": (255, 165, 0),
+            "terracotta": (204, 78, 92),
+            "schwarz": (0, 0, 0),
+            "weiß": (255, 255, 255)
+        }
+        
+        # Reverse mapping for RGB to color name
+        self.rgb_to_color = {v: k for k, v in self.color_map.items()}
+    
+    def __get_color_rgb(self, channel=None, current_mode=None):
+        """
+        Get RGB values from a specific sensor channel.
+        
+        Args:
+            channel: Multiplexer channel number (1=left, 2=middle, 3=right)
+            current_mode: Current operation mode for debug filtering
+            
+        Returns:
+            tuple: (R, G, B) values
+        """
+        if channel is None:
+            channel = self.middle_channel
+            
+        try:
+            # Switch to the correct multiplexer channel
+            self.mux.switch_channel(channel)
+            time.sleep(0.01)  # Small delay for channel switching
+            
+            # Read color from sensor
+            if channel == self.left_channel:
+                rgb = self.left_sensor.get_rgb()
+            elif channel == self.middle_channel:
+                rgb = self.middle_sensor.get_rgb()
+            elif channel == self.right_channel:
+                rgb = self.right_sensor.get_rgb()
+            else:
+                return (0, 0, 0)
+                
+            if get_debug() and current_mode == "line track":
+                debug_print(f"Channel {channel} RGB: {rgb}", action="color_sensor", msg="RGB Reading")
+                
+            return rgb
+            
+        except Exception as e:
+            if get_debug() and current_mode == "line track":
+                debug_print(f"Color sensor error on channel {channel}: {e}", action="color_sensor", msg="Sensor Error")
+            return (0, 0, 0)
+    
+    def get_color_rgb_convert(self):
+        """
+        Get RGB values from all three sensors.
+        
+        Returns:
+            list: [left_rgb, middle_rgb, right_rgb]
+        """
+        return [
+            self.__get_color_rgb(self.left_channel),
+            self.__get_color_rgb(self.middle_channel), 
+            self.__get_color_rgb(self.right_channel)
+        ]
+    
+    def _rgb_distance(self, rgb1, rgb2):
+        """
+        Calculate Euclidean distance between two RGB colors.
+        
+        Args:
+            rgb1: First RGB tuple
+            rgb2: Second RGB tuple
+            
+        Returns:
+            float: Distance between colors
+        """
+        return ((rgb1[0] - rgb2[0])**2 + (rgb1[1] - rgb2[1])**2 + (rgb1[2] - rgb2[2])**2)**0.5
+    
+    def _closest_color_name(self, rgb):
+        """
+        Find the closest color name for given RGB values.
+        
+        Args:
+            rgb: RGB tuple to match
+            
+        Returns:
+            str: Closest color name
+        """
+        min_distance = float('inf')
+        closest_color = "schwarz"
+        
+        for color_name, color_rgb in self.color_map.items():
+            distance = self._rgb_distance(rgb, color_rgb)
+            if distance < min_distance:
+                min_distance = distance
+                closest_color = color_name
+                
+        return closest_color
+    
+    def get_color_str(self):
+        """
+        Get color names for all three sensors.
+        
+        Returns:
+            list: [left_color_name, middle_color_name, right_color_name]
+        """
+        rgb_values = self.get_color_rgb_convert()
+        return [
+            self._closest_color_name(rgb_values[0]),
+            self._closest_color_name(rgb_values[1]),
+            self._closest_color_name(rgb_values[2])
+        ]
+    
+    def color_match(self, target_rgb, current_mode=None, threshold=50):
+        """
+        Check if middle sensor detects the target color.
+        
+        Args:
+            target_rgb: Target RGB color to match
+            current_mode: Current operation mode for debug filtering
+            threshold: Color matching threshold
+            
+        Returns:
+            bool: True if color matches, False otherwise
+        """
+        current_rgb = self.__get_color_rgb(self.middle_channel, current_mode)
+        distance = self._rgb_distance(current_rgb, target_rgb)
+        
+        match = distance < threshold
+        
+        if get_debug() and current_mode == "line track":
+            debug_print(f"Color match: {match}, distance: {distance:.1f}", action="color_match", msg="Color Detection")
+            
+        return match
+    
+    def follow_line(self, power=80, current_mode=None):
+        """
+        Follow a line using the three color sensors.
+        
+        Args:
+            power: Motor power for line following
+            current_mode: Current operation mode for debug filtering
+            
+        Returns:
+            str: Movement direction ('forward', 'left', 'right', 'stop')
+        """
+        # Get current color readings
+        colors = self.get_color_str()
+        left_color, middle_color, right_color = colors
+        
+        # Determine movement based on which sensor sees the target color
+        if middle_color == self.target_color:
+            if not get_debug():
+                move('forward', power)
+            else:
+                if current_mode == "line track":
+                    debug_print(f"Moving forward (middle sensor on target)", action="line_follow", msg="Forward")
+            return 'forward'
+            
+        elif left_color == self.target_color:
+            if not get_debug():
+                move('left', power)
+            else:
+                if current_mode == "line track":
+                    debug_print(f"Moving left (left sensor on target)", action="line_follow", msg="Left")
+            return 'left'
+            
+        elif right_color == self.target_color:
+            if not get_debug():
+                move('right', power)
+            else:
+                if current_mode == "line track":
+                    debug_print(f"Moving right (right sensor on target)", action="line_follow", msg="Right")
+            return 'right'
+            
+        else:
+            if not get_debug():
+                stop()
+            else:
+                if current_mode == "line track":
+                    debug_print(f"No target color detected, stopping", action="line_follow", msg="Stop")
+            return 'stop'
+    
+    def set_target_color(self, color_name):
+        """
+        Set the target color to follow by name.
+        
+        Args:
+            color_name: Name of color to follow
+        """
+        if color_name.lower() in self.color_map:
+            self.target_color = color_name.lower()
+            self.target_color_rgb = self.color_map[color_name.lower()]
+            if get_debug():
+                debug_print(f"Target color set to {color_name}: {self.target_color_rgb}", action="color_setup", msg="Target Color")
+        else:
+            if get_debug():
+                debug_print(f"Unknown color: {color_name}", action="color_setup", msg="Color Error")
+    
+    def set_target_rgb(self, rgb):
+        """
+        Set the target color to follow by RGB values.
+        
+        Args:
+            rgb: RGB tuple to follow
+        """
+        self.target_color_rgb = rgb
+        self.target_color = self._closest_color_name(rgb)
+        if get_debug():
+            debug_print(f"Target RGB set to {rgb} ({self.target_color})", action="color_setup", msg="Target RGB")
 
 '''------------ Instantiate -------------'''
 try:
@@ -238,7 +482,6 @@ def cleanup_lights():
         debug_print("Lights cleanup executed", action="cleanup", msg="Lights")
 
 
-    
 
 '''----------------- motors fuctions ---------------------'''
 def my_car_move(throttle_power, steer_power, gradually=False):

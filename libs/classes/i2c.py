@@ -15,6 +15,7 @@ class MyI2C(Lockable):
     """
     def __init__(self, freq=DEFAULT_FREQ): 
         self.__buf1 = bytearray(1)                    # one-byte buffer
+        self.__buf8 = bytearray(8)                    # eight-byte buffer
         self.__connected = False
         self.__Bus = SoftI2C(sda=Pin(2), scl=Pin(3), freq=freq)
 
@@ -31,7 +32,17 @@ class MyI2C(Lockable):
         except Exception as err:
             print("I2C read_register error:", err)
             return -1
-    
+
+    def __read_alldata(self, addr, reg):
+        """ read all counts (8 contigguous data registers) into local buffer """
+        try:
+            # self.__Bus.readfrom_mem_into(self.__addr, TCSCMD_ADDRESS | TCSREG_ALLDATA, self.__buf8)
+            self.__Bus.readfrom_mem_into(addr, reg, self.__buf8)
+            return self.__buf8
+        except Exception as err:
+            print(f"I2C read_alldata error: {err}")
+            return None
+
     
     def __write_register(self, addr, reg, data):
         """ write register """
