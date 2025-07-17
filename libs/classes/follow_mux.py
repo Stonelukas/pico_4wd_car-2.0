@@ -158,7 +158,16 @@ class Follow:
             return None
 
     def __get_color_rgb(self, current_mode: Optional[str] = None) -> Tuple[int, int, int]:
-        """Get the detected color from the middle sensor as RGB."""
+        """
+        Get RGB values from a specific sensor channel.
+        
+        Args:
+            channel: Multiplexer channel number (1=left, 2=middle, 3=right)
+            current_mode: Current operation mode for debug filtering
+            
+        Returns:
+            tuple: (R, G, B) values
+        """
         self.current_mode = current_mode
         if self.current_mode != 'line track':
             return (0, 0, 0)

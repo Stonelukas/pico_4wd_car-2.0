@@ -21,7 +21,7 @@ from classes.speed import Speed
 from classes.grayscale import Grayscale
 from ws import WS_Server
 from machine import Pin
-from classes.follow_mux import Follow
+from classes.follow import Follow
 
 VERSION = '1.3.0'
 print(f"[ Pico-4WD Car App Control {VERSION}]\n")
@@ -126,7 +126,7 @@ try:
     speed = Speed(8, 9)
     grayscale = Grayscale(26, 27, 28)
     ws = WS_Server(name=NAME, mode=WIFI_MODE, ssid=SSID, password=PASSWORD)
-    sensors = Follow(Left_channel=1, Middle_channel=2, Right_channel=3, target_rgb=(255, 0, 0))
+    sensors = Follow(target_rgb=(255, 0, 0))
     left_color = sensors.get_color_str()[0]
     middle_color = sensors.get_color_str()[1]
     right_color = sensors.get_color_str()[2]
