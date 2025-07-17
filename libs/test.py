@@ -16,12 +16,12 @@ import motors as car
 from motors import move, stop
 import sonar as sonar
 import lights as lights
-from helper import set_debug, get_debug, debug_print
+from helper import set_debug, get_debug, debug_print, print_on_change_decorator, print_once_decorator
 from classes.speed import Speed
 from classes.grayscale import Grayscale
 from ws import WS_Server
 from machine import Pin
-from classes.follow_mux import Follow
+from classes.follow_fake import Follow
 
 VERSION = '1.3.0'
 print(f"[ Pico-4WD Car App Control {VERSION}]\n")
@@ -76,7 +76,7 @@ OBSTACLE_AVOID_TURNING_POWER = 50
 
 
 '''Configure the power of the line_track mode'''
-LINE_TRACK_POWER = 80
+LINE_TRACK_POWER = 30
 
 '''Configure singal light'''
 singal_on_color = [255, 255, 0] # amber:[255, 191, 0]
@@ -121,259 +121,17 @@ sonar_distance = 0
 avoid_proc = "scan" # obstacle process, "scan", "getdir", "stop", "forward", "left", "right"
 avoid_has_obstacle = False
 
-class Follow:
-    def __init__(self, Left_channel, Middle_channel, Right_channel, target_rgb=(255, 0, 0)):
-        """
-        Initialize the Follow class for line tracking with color sensors.
-        
-        Args:
-            Left_channel: I2C multiplexer channel for left color sensor
-            Middle_channel: I2C multiplexer channel for middle color sensor  
-            Right_channel: I2C multiplexer channel for right color sensor
-            target_rgb: Target RGB color to follow (default red)
-        """
-        
-        # Initialize I2C and multiplexer
-        self.i2c_instance = MyI2C()
-        self.mux = TCA9548A(self.i2c_instance)
-        
-        # Store channel numbers
-        self.left_channel = Left_channel
-        self.middle_channel = Middle_channel
-        self.right_channel = Right_channel
-        
-        # Initialize color sensors
-        self.left_sensor = TCS34725(i2c=self.i2c_instance)
-        self.middle_sensor = TCS34725(i2c=self.i2c_instance)
-        self.right_sensor = TCS34725(i2c=self.i2c_instance)
-        
-        # Color tracking settings
-        self.target_color = "rot"  # Default target color name
-        self.target_color_rgb = target_rgb
-        
-        # Color mapping for string conversion
-        self.color_map = {
-            "rot": (255, 0, 0),
-            "grün": (0, 255, 0),
-            "blau": (0, 0, 255),
-            "gelb": (255, 255, 0),
-            "lila": (128, 0, 128),
-            "orange": (255, 165, 0),
-            "terracotta": (204, 78, 92),
-            "schwarz": (0, 0, 0),
-            "weiß": (255, 255, 255)
-        }
-        
-        # Reverse mapping for RGB to color name
-        self.rgb_to_color = {v: k for k, v in self.color_map.items()}
-    
-    def __get_color_rgb(self, channel=None, current_mode=None):
-        """
-        Get RGB values from a specific sensor channel.
-        
-        Args:
-            channel: Multiplexer channel number (1=left, 2=middle, 3=right)
-            current_mode: Current operation mode for debug filtering
-            
-        Returns:
-            tuple: (R, G, B) values
-        """
-        if channel is None:
-            channel = self.middle_channel
-            
-        try:
-            # Switch to the correct multiplexer channel
-            self.mux.switch_channel(channel)
-            time.sleep(0.01)  # Small delay for channel switching
-            
-            # Read color from sensor
-            if channel == self.left_channel:
-                rgb = self.left_sensor.get_rgb()
-            elif channel == self.middle_channel:
-                rgb = self.middle_sensor.get_rgb()
-            elif channel == self.right_channel:
-                rgb = self.right_sensor.get_rgb()
-            else:
-                return (0, 0, 0)
-                
-            if get_debug() and current_mode == "line track":
-                debug_print(f"Channel {channel} RGB: {rgb}", action="color_sensor", msg="RGB Reading")
-                
-            return rgb
-            
-        except Exception as e:
-            if get_debug() and current_mode == "line track":
-                debug_print(f"Color sensor error on channel {channel}: {e}", action="color_sensor", msg="Sensor Error")
-            return (0, 0, 0)
-    
-    def get_color_rgb_convert(self):
-        """
-        Get RGB values from all three sensors.
-        
-        Returns:
-            list: [left_rgb, middle_rgb, right_rgb]
-        """
-        return [
-            self.__get_color_rgb(self.left_channel),
-            self.__get_color_rgb(self.middle_channel), 
-            self.__get_color_rgb(self.right_channel)
-        ]
-    
-    def _rgb_distance(self, rgb1, rgb2):
-        """
-        Calculate Euclidean distance between two RGB colors.
-        
-        Args:
-            rgb1: First RGB tuple
-            rgb2: Second RGB tuple
-            
-        Returns:
-            float: Distance between colors
-        """
-        return ((rgb1[0] - rgb2[0])**2 + (rgb1[1] - rgb2[1])**2 + (rgb1[2] - rgb2[2])**2)**0.5
-    
-    def _closest_color_name(self, rgb):
-        """
-        Find the closest color name for given RGB values.
-        
-        Args:
-            rgb: RGB tuple to match
-            
-        Returns:
-            str: Closest color name
-        """
-        min_distance = float('inf')
-        closest_color = "schwarz"
-        
-        for color_name, color_rgb in self.color_map.items():
-            distance = self._rgb_distance(rgb, color_rgb)
-            if distance < min_distance:
-                min_distance = distance
-                closest_color = color_name
-                
-        return closest_color
-    
-    def get_color_str(self):
-        """
-        Get color names for all three sensors.
-        
-        Returns:
-            list: [left_color_name, middle_color_name, right_color_name]
-        """
-        rgb_values = self.get_color_rgb_convert()
-        return [
-            self._closest_color_name(rgb_values[0]),
-            self._closest_color_name(rgb_values[1]),
-            self._closest_color_name(rgb_values[2])
-        ]
-    
-    def color_match(self, target_rgb, current_mode=None, threshold=50):
-        """
-        Check if middle sensor detects the target color.
-        
-        Args:
-            target_rgb: Target RGB color to match
-            current_mode: Current operation mode for debug filtering
-            threshold: Color matching threshold
-            
-        Returns:
-            bool: True if color matches, False otherwise
-        """
-        current_rgb = self.__get_color_rgb(self.middle_channel, current_mode)
-        distance = self._rgb_distance(current_rgb, target_rgb)
-        
-        match = distance < threshold
-        
-        if get_debug() and current_mode == "line track":
-            debug_print(f"Color match: {match}, distance: {distance:.1f}", action="color_match", msg="Color Detection")
-            
-        return match
-    
-    def follow_line(self, power=80, current_mode=None):
-        """
-        Follow a line using the three color sensors.
-        
-        Args:
-            power: Motor power for line following
-            current_mode: Current operation mode for debug filtering
-            
-        Returns:
-            str: Movement direction ('forward', 'left', 'right', 'stop')
-        """
-        # Get current color readings
-        colors = self.get_color_str()
-        left_color, middle_color, right_color = colors
-        
-        # Determine movement based on which sensor sees the target color
-        if middle_color == self.target_color:
-            if not get_debug():
-                move('forward', power)
-            else:
-                if current_mode == "line track":
-                    debug_print(f"Moving forward (middle sensor on target)", action="line_follow", msg="Forward")
-            return 'forward'
-            
-        elif left_color == self.target_color:
-            if not get_debug():
-                move('left', power)
-            else:
-                if current_mode == "line track":
-                    debug_print(f"Moving left (left sensor on target)", action="line_follow", msg="Left")
-            return 'left'
-            
-        elif right_color == self.target_color:
-            if not get_debug():
-                move('right', power)
-            else:
-                if current_mode == "line track":
-                    debug_print(f"Moving right (right sensor on target)", action="line_follow", msg="Right")
-            return 'right'
-            
-        else:
-            if not get_debug():
-                stop()
-            else:
-                if current_mode == "line track":
-                    debug_print(f"No target color detected, stopping", action="line_follow", msg="Stop")
-            return 'stop'
-    
-    def set_target_color(self, color_name):
-        """
-        Set the target color to follow by name.
-        
-        Args:
-            color_name: Name of color to follow
-        """
-        if color_name.lower() in self.color_map:
-            self.target_color = color_name.lower()
-            self.target_color_rgb = self.color_map[color_name.lower()]
-            if get_debug():
-                debug_print(f"Target color set to {color_name}: {self.target_color_rgb}", action="color_setup", msg="Target Color")
-        else:
-            if get_debug():
-                debug_print(f"Unknown color: {color_name}", action="color_setup", msg="Color Error")
-    
-    def set_target_rgb(self, rgb):
-        """
-        Set the target color to follow by RGB values.
-        
-        Args:
-            rgb: RGB tuple to follow
-        """
-        self.target_color_rgb = rgb
-        self.target_color = self._closest_color_name(rgb)
-        if get_debug():
-            debug_print(f"Target RGB set to {rgb} ({self.target_color})", action="color_setup", msg="Target RGB")
-
 '''------------ Instantiate -------------'''
 try:
     speed = Speed(8, 9)
     grayscale = Grayscale(26, 27, 28)
     ws = WS_Server(name=NAME, mode=WIFI_MODE, ssid=SSID, password=PASSWORD)
-    sensors = Follow(Left_channel=1, Middle_channel=2, Right_channel=3, target_rgb=(255, 0, 0))
-    left_color = sensors.get_color_str()[0]
-    middle_color = sensors.get_color_str()[1]
-    right_color = sensors.get_color_str()[2]
+    grayscale = Grayscale(26, 27, 28)
+    sensors = Follow(target_color="orange")
+    left_color = sensors.left
+    middle_color = sensors.middle
+    right_color = sensors.right
+    steer_power = 50
 except Exception as e:
     onboard_led.off()
     sys.print_exception(e)
@@ -507,6 +265,34 @@ def my_car_move(throttle_power, steer_power, gradually=False):
 
 '''----------------- color_line_track ---------------------'''
 
+@print_once_decorator
+def print_hub():
+    print(f"Auto ist nicht im Hub.")
+    
+def grayscale_color(hub = False):
+    gs_list = grayscale.get_value()
+    left = ""
+    middle = ""
+    right = ""
+    if hub:
+        left = "green"
+        middle = "green"
+        right = "green"
+    else:
+        if gs_list[0] >= 10000:
+            left = "orange"
+        else:
+            left = "black"
+        if gs_list[1] >= 10000:
+            middle = "orange"
+        else:
+            middle = "black"
+        if gs_list[2] >= 10000:
+            right = "orange"
+        else:
+            right = "black"
+    return (left, middle, right)
+
 def hub():
     global line_out_time, move_status, line_status, line_track_active
     global left_color, middle_color, right_color
@@ -514,49 +300,67 @@ def hub():
 
     line_track_active = True
     
+    left_color = grayscale_color()[0]
+    middle_color = grayscale_color()[1]
+    right_color = grayscale_color()[2]
     # Check exit conditions at the start
     if should_exit_with_cleanup("line_track", cleanup_line_track):
         return
 
-    if left_color != "grün" and middle_color != "grün" and right_color != "grün":
-        print(f"Auto ist nicht im Hub.")
+    if left_color != "green" and middle_color != "green" and right_color != "green":
+        print_hub()
+        debug_print(f"Colors detected - Left: {left_color}, Middle: {middle_color}, Right: {right_color}")
     else:
-        if middle_color == "grün" and left_color != "grün":
+        if middle_color == "green" and left_color == "green":
+            print("Auto ist im Hub.")
             move('forward', _power)
+            debug_print(f"Moving forward in hub, power: {_power}", action="hub", msg="Hub Forward")
             move_status = 'forward'
             move('turn_in_place_right', _power)
+            debug_print(f"Turning in place right in hub, power: {_power}", action="hub", msg="Hub Right Turn")
             move_status = 'turn_in_place_right'
             
-            while not (left_color == "grün" and middle_color == "grün" and right_color == sensors.target_color):
+            while not (left_color == "green" and middle_color == "green" and right_color == sensors.target_color):
+                debug_print(f"Current colors - Left: {left_color}, Middle: {middle_color}, Right: {right_color}",
+                            action="hub", msg="Color Check")
                 # Check exit conditions in the loop
                 if should_exit_with_cleanup("line_track", cleanup_line_track):
                     return
                     
-                if left_color == "grün" and middle_color == "grün":
+                if left_color == "green" and middle_color == "green":
                     move('forward', _power)
+                    debug_print(f"Moving forward in hub, power: {_power}", action="hub", msg="Hub Forward")
                     move_status = 'forward'
-                elif left_color == "grün":
+                elif left_color == "green":
                     move('left', _power)
+                    debug_print(f"Turning left in hub, power: {_power}", action="hub", msg="Hub Left Turn")
                     move_status = 'left'
                 
                 # Update sensor readings
-                left_color = sensors.get_color_str()[0]
-                middle_color = sensors.get_color_str()[1]
-                right_color = sensors.get_color_str()[2]
-                
+                left_color = grayscale_color()[0]
+                middle_color = grayscale_color()[1]
+                right_color = grayscale_color()[2]
                 # Small delay to make loop responsive
                 time.sleep(0.01)
                 
             stop()
             line_status = 'target found'
+            debug_print(f"Found target color: {sensors.target_color}, status: {line_status}", action="line_track", msg="Found Target")
 
 
 def line_track(way_back=None):
     global line_out_time, move_status, line_status, line_track_active, left_color, middle_color, right_color
     _power = LINE_TRACK_POWER
     
+    left_color = grayscale_color()[0]
+    middle_color = grayscale_color()[1]
+    right_color = grayscale_color()[2]
+
+    print(grayscale_color())
+    time.sleep(1)
+
     destination_cond = (middle_color == 'terracotta' and left_color == 'terracotta' and right_color == 'terracotta') 
-    way_back_cond = (middle_color == 'grün' and left_color == 'grün' and right_color == 'grün')
+    way_back_cond = (middle_color == 'green' and left_color == 'green' and right_color == 'green')
 
     if way_back:
         cond = way_back_cond
@@ -564,31 +368,48 @@ def line_track(way_back=None):
         cond = destination_cond
 
     if not cond:
-        while not (middle_color == sensors.target_color and left_color == sensors.target_color and right_color == sensors.target_color):
+        while not (middle_color == "orange" and left_color == "orange" and right_color == "orange") :
+            # debug_print(f"Current colors - Left: {left_color}, Middle: {middle_color}, Right: {right_color}",
+            #             action="line_track", msg="Color Check")
+            # time.sleep(1)
+            # Update sensor readings
+            left_color = grayscale_color()[0]
+            middle_color = grayscale_color()[1]
+            right_color = grayscale_color()[2]
             # Check exit conditions in the loop
             if should_exit_with_cleanup("line_track", cleanup_line_track):
                 return
                 
             if middle_color == sensors.target_color:
                 move('forward', _power)
+                debug_print(f"Moving forward in line track, power: {_power}", action="line_track", msg="Line Track Forward")
+                time.sleep(0.3)
+                # print(f"Colors detected - Left: {left_color}, Middle: {middle_color}, Right: {right_color}")
                 move_status = 'forward'
             elif right_color == sensors.target_color:
                 move('right', _power)
+                debug_print(f"Turning right in line track, power: {_power}", action="line_track", msg="Line Track Right Turn")
+                time.sleep(0.3)
+                # print(f"Colors detected - Left: {left_color}, Middle: {middle_color}, Right: {right_color}")
                 move_status = 'right'
             elif left_color == sensors.target_color:
                 move('left', _power)
+                debug_print(f"Turning left in line track, power: {_power}", action="line_track", msg="Line Track Left Turn")
+                time.sleep(0.3)
+                # print(f"Colors detected - Left: {left_color}, Middle: {middle_color}, Right: {right_color}")
                 move_status = 'left'
-            
-            # Update sensor readings
-            left_color = sensors.get_color_str()[0]
-            middle_color = sensors.get_color_str()[1]
-            right_color = sensors.get_color_str()[2]
-            
-            # Small delay to make loop responsive
-            time.sleep(0.01)
+            else:
+                stop()
+                move_status = 'stop'
+                debug_print(f"Car stopped, colors - Left: {left_color}, Middle: {middle_color}, Right: {right_color}",
+                            action="line_track", msg="Line Track Stop")
+                
+                # Small delay to make loop responsive
+                time.sleep(0.01)
             
         stop()
         move_status = 'stop'
+        debug_print(f"Line track end reached, waiting for return colors - Left: {left_color}, Middle: {middle_color}, Right: {right_color}", action="line_track", msg="Line Track End")
         if way_back:
             line_status = 'finish'
         else:
@@ -766,7 +587,7 @@ def on_receive(data):
     # ws.send_dict['R'] = sensors.get_color_rgb_convert()[2] # Blue component
     # TODO: Add data to send to the app
     # 0 = Line Color off, 1 = Line Color on
-    ws.send_dict['J'] = 1 if sensors.color_match(sensors.__get_color_rgb(current_mode=mode), current_mode=mode) else 0
+    # ws.send_dict['J'] = 1 if sensors.color_match(sensors.__get_color_rgb(current_mode=mode), current_mode=mode) else 0
 
     ''' remote control'''
     # Move - power
@@ -789,8 +610,7 @@ def on_receive(data):
             dpad_touched = True
             move_status = 'right'
             if steer_power < 0:
-                steer_power = 0
-            steer_power += int(throttle_power/2)
+                steer_power += int(throttle_power/2)
             if steer_power > 100:
                 steer_power = 100
         elif data['K'] == "forward":
@@ -849,24 +669,13 @@ def on_receive(data):
     # color select: Purple, Blue, Yellow, Orange, Terracotta
     # Set target color based on received buttons
     if start:
-        if 'N' in data.keys() and data['N']:
-            # sensors.target_color = "Purple"
-            print("purple")
-            # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
-        if 'O' in data.keys() and data['O']:
-            # sensors.target_color = "Blue"
-            print("blue")
-            # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
-        if 'P' in data.keys() and data['P']:
-            # sensors.target_color = "Yellow"
-            print("yellow")
-            # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
         if 'S' in data.keys() and data['S']:
-            # sensors.target_color = "Orange"
-            print("orange")
+            color = grayscale_color(hub=True)
+            print(color)
+            print(mode, line_status)
             # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
         if 'T' in data.keys() and data['T']:
-            # sensors.target_color = "Terracotta"
+            sensors.target_color = "terracotta"
             print("terracotta")
             # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
 
@@ -923,7 +732,7 @@ def remote_handler():
     ''' mode: Line Track or Obstacle Avoid or Follow '''
     if not dpad_touched and start_line_track:
         if mode == 'line track':
-            hub()
+            line_status = 'target found'
             if line_status == 'target found':
                 line_track()
             elif line_status == 'way back':
