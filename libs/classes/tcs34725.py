@@ -86,8 +86,8 @@ class TCS34725:
             return
         self.__id = self.__read_register(TCSREG_ID)
         # Validate the device ID
-        if not self.__id in TCS3472x_dict.keys():
-            print(f"Failed to detect supported color sensor.")
+        if self.__id not in TCS3472x_dict.keys():
+            print("Failed to detect supported color sensor.")
             print(f"Expected ID {TCS34725_ID:#X} ({TCS3472x_dict[TCS34725_ID]}) or "
                 f"{TCS34727_ID:#X} ({TCS3472x_dict[TCS34727_ID]}), "
                 f"received {self.__id:#02X}")

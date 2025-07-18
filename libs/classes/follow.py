@@ -5,7 +5,7 @@ from machine import Pin
 from helper import debug_print, get_debug
 from typing import Optional, Union, Tuple, Any
 
-from classes.tcs34725 import *
+from classes.tcs34725 import TCS34725, TCSGAIN_LOW, TCSINTEG_MEDIUM
 from classes.i2c import MyI2C
 
 class Follow:
@@ -118,6 +118,8 @@ class Follow:
     def target_color(self) -> str:
         """Get the target color for the line as a string from predefined colors"""
         return self._get_closest_color_name(self.target_rgb)
+    
+    color = target_color
 
     @target_color.setter
     def target_color(self, color: str) -> None:
@@ -238,6 +240,23 @@ class Follow:
         else:
             match = int(0)
         return match
+    
+    def get_color_str(self) -> Tuple[str, str, str]:
+        """
+        Returns:
+        tuple of str: Color that corresponds to the RGB values.
+        (left, middle, right)
+        """
+        left_result = self.rgb_to_color_name(rgb=self._read_sensor(self.left_sensor))
+        middle_result = self.rgb_to_color_name(rgb=self._read_sensor(self.middle_sensor))
+        right_result = self.rgb_to_color_name(rgb=self._read_sensor(self.right_sensor))
+        
+        # Ensure we return strings (cast to str if needed)
+        left = str(left_result) if isinstance(left_result, str) else ""
+        middle = str(middle_result) if isinstance(middle_result, str) else ""
+        right = str(right_result) if isinstance(right_result, str) else ""
+
+        return (left, middle, right)
 
     def follow_line(self, power: int, current_mode: Optional[str] = None) -> Optional[str]:
         """Follow the line based on sensor readings.
@@ -360,4 +379,5 @@ class Follow:
             return "center"
 
 if __name__ == "__main__":
+    pass
 

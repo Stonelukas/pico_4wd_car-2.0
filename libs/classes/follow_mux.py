@@ -4,7 +4,7 @@ from time import sleep
 from typing import Optional, Union, Tuple, Any
 from helper import debug_print, get_debug
 
-from classes.tcs34725_mux import *
+from classes.tcs34725_mux import TCS34725, TCSGAIN_LOW, TCSINTEG_MEDIUM
 from classes.i2c import MyI2C
 
 class Follow:

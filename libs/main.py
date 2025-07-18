@@ -16,12 +16,13 @@ import motors as car
 from motors import move, stop
 import sonar as sonar
 import lights as lights
-from helper import set_debug, get_debug, debug_print, print_once
+from helper import set_debug, get_debug, debug_print
 from classes.speed import Speed
 from classes.grayscale import Grayscale
 from ws import WS_Server
 from machine import Pin
 from classes.follow import Follow
+from random_line import random_line
 
 VERSION = '1.3.0'
 print(f"[ Pico-4WD Car App Control {VERSION}]\n")
@@ -276,7 +277,7 @@ def hub():
         return
 
     if left_color != "grün" and middle_color != "grün" and right_color != "grün":
-        print(f"Auto ist nicht im Hub.")
+        print("Auto ist nicht im Hub.")
     else:
         if middle_color == "grün" and left_color != "grün":
             move('forward', _power)
@@ -622,12 +623,13 @@ def on_receive(data):
             # sensors.target_color = "Orange"
             print("orange")
             # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
-        if 'T' in data.keys() and data['T']:
-            # sensors.target_color = "Terracotta"
-            print("terracotta")
+        if ["T"] in data.keys() and data["T"] and not line_track_active:
+            #
+            random_farbe = random_line()
+            sensors.target_color = random_farbe
             # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
 
-        
+
 
     # Debug mode - Only Print Actions
     if 'F' in data.keys() and start and isinstance(data['F'], bool):

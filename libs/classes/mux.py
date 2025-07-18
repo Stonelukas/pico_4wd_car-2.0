@@ -47,7 +47,7 @@ class TCA9548A_Channel(SoftI2C):
             new_devices : list = self.tca.i2c.scan()
             result = result + new_devices
             self.unlock()
-        print(f"Devices found:")
+        print("Devices found:")
         print("\n".join([str(device) for device in result])) 
 
 class TCA9548A:
