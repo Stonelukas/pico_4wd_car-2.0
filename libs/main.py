@@ -22,7 +22,6 @@ from classes.grayscale import Grayscale
 from ws import WS_Server
 from machine import Pin
 from classes.follow import Follow
-from random_line import random_line
 
 VERSION = '1.3.0'
 print(f"[ Pico-4WD Car App Control {VERSION}]\n")
@@ -142,6 +141,7 @@ except Exception as e:
 
 '''----------------- Helper Functions ---------------------'''
 
+# TODO: Not working.
 def should_exit_operation(operation_type="general"):
     """
     Universal exit condition checker for various operations.
@@ -382,49 +382,6 @@ def line_track_end():
         
     line_status = "way back"
 
-# def color_line_track(rgb=None):
-#     """Track a colored line using the color sensors.
-    
-#     Args:
-#         rgb: Optional tuple of (R, G, B) values for the line color.
-#              If not provided, the default target color will be used.
-    
-#     Returns:
-#         None
-#     """
-#     global move_status
-    
-#     # Only execute if we're actually in line track mode
-#     if mode != 'line track':
-#         return
-        
-#     # Example: channels 1, 2, 3 and a red line (adjust as needed)
-#     target_rgb = rgb or (255, 0, 0)  # Default to red if no color is provided
-    
-#     # Update the target color to track
-#     sensors.target_color = target_rgb
-    
-#     # Get the car's movement direction from the follow_line function
-#     # Pass the current mode to ensure debug prints only happen in line_track mode
-#     new_move_status = sensors.follow_line(power=LINE_TRACK_POWER, current_mode=mode)
-    
-#     # Only update move_status if we got a valid status
-#     if new_move_status is not None:
-#         move_status = new_move_status
-
-# def auto_color_line_track():
-#     """ Scan for a Color on the middle Sensor and use that as the Target RGB to follow. """
-#     global move_status
-    
-#     # Only execute if we're actually in line track mode
-#     if mode != 'line track':
-#         return
-
-#     target_rgb = sensors.get_color(current_mode=mode)
-#     if get_debug():
-#         debug_print(f"Auto-tracking color: {target_rgb}", action="line_track", msg="Auto Color Track")
-#     color_line_track(target_rgb)
-
 
 '''----------------- singal_lights_handler ---------------------'''
 def singal_lights_handler():
@@ -522,8 +479,8 @@ def on_receive(data):
     # ws.send_dict['M'] = sensors.get_color_rgb_convert()[0] # Red component
     # ws.send_dict['Q'] = sensors.get_color_rgb_convert()[1] # Green component
     # ws.send_dict['R'] = sensors.get_color_rgb_convert()[2] # Blue component
-    # TODO: Add data to send to the app
     # 0 = Line Color off, 1 = Line Color on
+    # TODO: update method __get_color_rgb() 
     ws.send_dict['J'] = 1 if sensors.color_match(sensors.__get_color_rgb(current_mode=mode), current_mode=mode) else 0
 
     ''' remote control'''
@@ -623,11 +580,6 @@ def on_receive(data):
             # sensors.target_color = "Orange"
             print("orange")
             # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
-        if ["T"] in data.keys() and data["T"] and not line_track_active:
-            #
-            random_farbe = random_line()
-            sensors.target_color = random_farbe
-            # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
 
 
 
@@ -662,13 +614,6 @@ def remote_handler():
     global sonar_angle, sonar_distance
     global lights_brightness
     global left_color, middle_color, right_color, start_line_track, line_track_active
-
-    ''' Debug print '''
-    # if debug and mode is None:
-        # debug_print(("Motor Power:", throttle_power, "Steer Power:", steer_power, "Move Status:", move_status, "Sonar Angle:", sonar_angle, "Sonar Distance:", sonar_distance, "Grayscale Value:", grayscale.get_value(), "Lights Brightness:", lights_brightness), mode, msg='Remote Handler Data')
-        # sonar.servo.set_angle(0)  # Allow sonar to move
-        # mode = None  # Stop mode if debug mode is on
-        
 
     ''' if not connected, skip & stop '''
     if not ws.is_connected() or not start:
@@ -730,4 +675,3 @@ if __name__ == "__main__":
             onboard_led.off()
             time.sleep(0.25)
             onboard_led.on()
-

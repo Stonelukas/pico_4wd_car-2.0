@@ -5,3 +5,5 @@
 uv.lock
 micropython-lib
 libs/main.py
+.mypy_cache
+.github
