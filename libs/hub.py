@@ -1,6 +1,5 @@
-import time
 from motors import move, stop
-from machine import I2C, Pin
+from machine import Pin
 from line_track import line_track
 
 '''Configure the power of the line_track mode'''
@@ -18,7 +17,7 @@ def hub(target_color, left, middle, right):
 
 
     if left != "grün" and middle != "grün" and right != "grün":
-        print(f"Auto ist nicht im Hub.")
+        print("Auto ist nicht im Hub.")
     else:
         if middle == "grün" and left != "grün":
             move('forward', _power)

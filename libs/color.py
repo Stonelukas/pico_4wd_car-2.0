@@ -1,6 +1,5 @@
-import sys 
 from time import sleep
-from machine import SoftI2C, Pin
+from machine import Pin
 
 from classes.standalone_tcs34725 import * 
 

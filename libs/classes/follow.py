@@ -53,7 +53,19 @@ class Follow:
         self.line_out_time = 0  # Track when line was lost
 
     def _validate_rgb(self, rgb: Tuple[Any, ...]) -> Tuple[int, int, int]:
-        """Validate RGB tuple and ensure it contains exactly 3 integers (R, G, B)."""
+        """ Validate RGB tuple and ensure it contains exactly 3 integers.
+
+        Args:
+            rgb (Tuple[Any, ...]): Tuple of 3 Color Values (R, G, B)
+
+        Raises:
+            ValueError: rgb must be tuple of 3 value 
+            ValueError: rgb must be numbers (int or float)
+            ValueError: rgb value at index was not a number
+
+        Returns:
+            Tuple[int, int, int]: Tuple of the 3 validated color values (R, G, B)
+        """        
         if not isinstance(rgb, tuple) or len(rgb) != 3:
             raise ValueError("RGB must be a tuple of exactly 3 values (R, G, B)")
         
@@ -74,7 +86,14 @@ class Follow:
         return tuple(validated_rgb)
     
     def _get_closest_color_name(self, rgb: Tuple[int, int, int]) -> str:
-        """Get the closest color name for an RGB value using the color_map."""
+        """ Get the closest color name for an RGB value using the color_map.
+
+        Args:
+            rgb (Tuple[int, int, int]): Tuple of 3 values (R, G, B)
+
+        Returns:
+            str: Color name for the rgb value (e.g.: (255, 0, 0) => "Red")
+        """      
         if rgb in self.rgb_to_color:
             return self.rgb_to_color[rgb]
         
@@ -91,11 +110,23 @@ class Follow:
         return closest_color
     
     def _read_sensor(self, sensor: Any) -> Tuple[int, int, int]:
+        """ Read color values from the specified sensor
+
+        Args:
+            sensor (Any): The sensor to read from
+
+        Returns:
+            Tuple[int, int, int]: Tuple of the 3 color values read from the sensor (R, G, B)
+        """
         return sensor.color_raw[:3] # (R, G, B)
     
     @property
     def target_color_rgb(self) -> Tuple[int, int, int]:
-        """Get the target color for the line."""
+        """ Get the target color for the line.
+
+        Returns:
+            Tuple[int, int, int]: 
+        """        
         return self.target_rgb
 
     @target_color_rgb.setter
@@ -104,7 +135,10 @@ class Follow:
         Set the target color to follow by RGB values.
         
         Args:
-            target_rgb: RGB values of the color to follow
+            target_rgb (Tuple[int, int, int]): RGB values of the color to follow
+
+        Returns:
+            None
         """
         self.target_rgb = self._validate_rgb(target_rgb)
         self.target_color = self._get_closest_color_name(self.target_rgb)
@@ -116,33 +150,52 @@ class Follow:
 
     @property
     def target_color(self) -> str:
-        """Get the target color for the line as a string from predefined colors"""
+        """ Get the target color for the line as a string from predefined colors
+
+        Returns:
+            str: Target color as color name (e.g "Red").
+        """
         return self._get_closest_color_name(self.target_rgb)
     
     color = target_color
 
     @target_color.setter
     def target_color(self, color: str) -> None:
-        """Set the target color using a predefined color name."""
+        """ Set the target color using a predefined color name.
+
+        Args:
+            color (str): Target color as color name (e.g "Red").
+
+        Raises:
+            ValueError: Color name not valid for the Sensor ("lila", "blau", "grün", "gelb", "orange", "terracotta")
+        """
         if color.lower() in self.color_map:
             self.target_rgb = self.color_map[color.lower()]
         else:
             raise ValueError(f"Invalid color name: '{color}'. Must be one of: {list(self.color_map.keys())}")
     
     def _color_distance(self, color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> float:
-        """Calculate the Euclidean distance between two RGB colors."""
+        """ Calculate the Euclidean distance between two RGB colors.
+
+        Args:
+            color1 (Tuple[int, int, int]): RGB values of the first color
+            color2 (Tuple[int, int, int]): RGB values of the second color
+
+        Returns:
+            float: Distance between the three colors (High -> colors do not match, lower -> colors are somewhat equal)
+        """        
         return sum((a - b) ** 2 for a, b in zip(color1, color2)) ** 0.5
 
     def get_colors(self, color_code: str = 'all') -> Optional[Union[float, Tuple[float, float, float]]]:
         """Get average color values from all three sensors.
         
         Args:
-            color_code: Color component to return ('red', 'green', 'blue', 'all', or 'rgb')
-                       Default is 'all' which returns all components as a tuple
+            color_code (str): Color component to return ('red', 'green', 'blue', 'all', or 'rgb')
+                              Default is 'all' which returns all components as a tuple
         
         Returns:
             float: Average value for single color component
-            tuple: (red, green, blue) tuple when color_code is 'all' or 'rgb'
+            tuple[float, float, float]: (red, green, blue) tuple when color_code is 'all' or 'rgb'
             None: If invalid color_code provided
         """
         try:
@@ -183,15 +236,28 @@ class Follow:
             return None
 
     def __get_color_rgb(self, current_mode: Optional[str] = None) -> Tuple[int, int, int]:
-        """Get the detected color from the middle sensor as RGB."""
+        """ Get the detected color from the middle sensor as RGB.
+
+        Args:
+            current_mode (Optional[str], optional): the mode the car is currently in, returns early if mode is not "line track". Defaults to None.
+
+        Returns:
+            Tuple[int, int, int]: RGB value of the middle Sensor. If mode is not "line track" return tuple of (0, 0, 0)
+        """        
+        self.current_mode = current_mode
+        if current_mode != "line track":
+            return (0, 0, 0)
         middle_color = self._read_sensor(self.middle_sensor)
         return middle_color
     
     def get_color_rgb_convert(self) -> Tuple[str, str, str]:
+        """ convert RGB value to a number with 2 numbers before the comma. The third number is after the comma.
+
+        Returns:
+            Tuple[str, str, str]: RGB color values (R, G, B)
         """
-        convert RGB value to a number with 2 numbers before the comma. 
-        The 3 number is after the comma.
-        return as tuple (R, G, B)
+        """
+        
         """
         rgb = self.__get_color_rgb()
         # Convert each RGB component to a string with 2 digits before the decimal and 1 after
@@ -201,14 +267,22 @@ class Follow:
         return (r, g, b)
 
     def get_color(self, current_mode: Optional[str] = None) -> Tuple[int, int, int]:
-        """ detects the color of the middle sensor and returns it as RGB tuple."""
+        """ Detects the color of the middle sensor and returns it as RGB tuple.
+
+        Args:
+            current_mode (Optional[str], optional): the mode the car is currently in, returns early if mode is not "line track". Defaults to None.
+                                                    Defaults to None.
+
+        Returns:
+        - Tuple[int, int, int]: RGB color values of the middle sensor.
+        """        
         self.current_mode = current_mode
         
         # Only proceed if we're in line track mode
         if current_mode != 'line track':
             return (0, 0, 0)  # Return black if not in line track mode
 
-        rgb = self.__get_color_rgb()
+        rgb = self._read_sensor(self.middle_sensor)
         if get_debug() and current_mode == 'line track':
             debug_print(f"Detected color: {rgb}", action="line_track", msg="Color Detection")
         return rgb
@@ -225,21 +299,20 @@ class Follow:
         else:
             raise ValueError(f"Unknown color: {color_name}. Available colors: {list(self.color_map.keys())}")
 
-    def __color_compare(self, color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> bool:
-        """ Compare two colors and return True if they match within the threshold. """
-        threshold = 30  # Define a threshold for color matching
-        return all(abs(c1 - c2) < threshold for c1, c2 in zip(color1, color2))
 
-
-    def color_match(self, color: Tuple[int, int, int]) -> int:
+    def color_match(self, color: Tuple[int, int, int], target_rgb: Optional[Tuple[int, int, int]]= None) -> bool:
         """Check if the detected color matches the target color."""
-        distance = self._color_distance(color, self.target_rgb)
-        print(f"Color: {color}, Target: {self.target_rgb}, Distance: {distance}")
+        # Return early if the line track mode is not on. 
+
+        if target_rgb is None:
+            target_rgb = self.target_rgb
+
+        distance = self._color_distance(color, target_rgb)
+        print(f"Color: {color}, Target: {target_rgb}, Distance: {distance}")
         if distance < self.color_threshold:
-            match = int(1)
+            return True
         else:
-            match = int(0)
-        return match
+            return False
     
     def get_color_str(self) -> Tuple[str, str, str]:
         """
@@ -257,81 +330,6 @@ class Follow:
         right = str(right_result) if isinstance(right_result, str) else ""
 
         return (left, middle, right)
-
-    def follow_line(self, power: int, current_mode: Optional[str] = None) -> Optional[str]:
-        """Follow the line based on sensor readings.
-        
-        This function should be called from main.py to follow a colored line.
-        It will use the debug flag to determine whether to actually move the motors
-        or just print debug information.
-        
-        Args:
-            power: Motor power level (0-100)
-            current_mode: Current operating mode of the car
-            
-        Returns:
-            The current move_status value ('left', 'right', 'forward', 'stop')
-        """
-        self.current_mode = current_mode
-        
-        # Only proceed if we're in line track mode
-        if self.current_mode != 'line track':
-            print("Not in line track mode, skipping follow_line.")
-            return None
-        
-        from motors import move, stop
-
-        position = self.get_line_position(self.current_mode)
-        # Check if debug mode is enabled and we're in line track mode
-        is_debug = get_debug() and self.current_mode == 'line track'
-
-        # Check if no line is detected
-        if position is None:
-            # If the car is out of the line, stop it
-            if self.line_out_time == 0:
-                self.line_out_time = time.time()
-                print("Warning: No target color detected by any sensor!")
-            
-            # If no line detected for more than 2 seconds, stop and wait
-            if (time.time() - self.line_out_time > 2):
-                print("Line lost! Stopping car. Please reposition the car on the line.")
-                stop()
-                position = 'stop'
-                # Print debug information
-                if is_debug:
-                    position = "stopped"
-                    power = 0
-                    debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Stopping line following")
-                # Wait for user intervention - the car will stay stopped
-                # until the line is found again or the user takes action
-                while self.get_line_position() is None:
-                    sleep(0.5)
-                    print("Waiting for line to be detected...")
-                print("Line detected again! Resuming...")
-                self.line_out_time = 0
-            return position
-        else:
-            # Reset the timer if line is detected
-            self.line_out_time = 0
-        # Execute movement based on line position
-        if position == "left":
-            if is_debug:
-                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
-            else:
-                move("left", power)
-        elif position == "right":
-            if is_debug:
-                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
-            else:
-                move("right", power)
-        else:
-            if is_debug:
-                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
-            else:
-                move("forward", power)
-        # Small delay to avoid overwhelming the motors
-        sleep(0.1)
-        return position
 
     def get_line_position(self, current_mode: Optional[str] = None) -> Optional[str]:
         """Determine the position of the line based on sensor readings."""
@@ -370,6 +368,7 @@ class Follow:
                 print("No target color detected by any sensor!")
             return None
 
+        # Returns only one direction, might change to mutliple if this approach is not working (with the self.color_compare method)
         min_dist = min(left_distance, middle_distance, right_distance)
         if min_dist == left_distance:
             return "left"
@@ -377,6 +376,85 @@ class Follow:
             return "right"
         else:
             return "center"
+
+    def color_match_bool(self, match_color: str) -> Tuple[bool, bool, bool]:
+        left_color = self.color_match(self._read_sensor(self.left_sensor), self.color_name_to_rgb(match_color))
+        middle_color = self.color_match(self._read_sensor(self.middle_sensor), self.color_name_to_rgb(match_color))
+        right_color = self.color_match(self._read_sensor(self.right_sensor), self.color_name_to_rgb(match_color))
+        
+        return left_color, middle_color, right_color
+
+    def hub_control_start(self, hub_color: str = "Green") -> Optional[bool]:
+        left_color, middle_color, right_color = self.color_match_bool(hub_color)
+
+        if not (left_color and middle_color and right_color): 
+            print("Auto ist nicht im Hub")
+            return None
+        else:
+            return True
+
+    def hub_find_line(self, hub_color: str = "Green") -> Optional[str]:
+        left_color, middle_color, right_color = self.color_match_bool(hub_color)
+
+        if left_color and middle_color:
+            return "forward"
+        else:
+            return "left"
+
+    def follow_line(self, power: int) -> Optional[str]:
+        """Follow the line based on sensor readings.
+        
+        This function should be called from main.py to follow a colored line.
+        It will use the debug flag to determine whether to actually move the motors
+        or just print debug information.
+        
+        Args:
+            power: Motor power level (0-100)
+            
+        Returns:
+            The current move_status value ('left', 'right', 'forward', 'stop')
+        """
+
+        position = self.get_line_position(self.current_mode)
+        # Check if debug mode is enabled and we're in line track mode
+        is_debug = get_debug() and self.current_mode == 'line track'
+
+        # Check if no line is detected
+        if position is None:
+            # If the car is out of the line, stop it
+            if self.line_out_time == 0:
+                self.line_out_time = time.time()
+                print("Warning: No target color detected by any sensor!")
+            
+            # If no line detected for more than 2 seconds, stop and wait
+            if (time.time() - self.line_out_time > 2):
+                print("Line lost! Stopping car. Please reposition the car on the line.")
+                position = 'stop'
+                # Print debug information
+                if is_debug:
+                    debug_position = "stopped"
+                    power = 0
+                    debug_print(("Direction:", debug_position, "Power:", power), action="line_track", msg="Stopping line following")
+                # Wait for user intervention - the car will stay stopped
+                # until the line is found again or the user takes action
+            return position
+        else:
+            # Reset the timer if line is detected
+            self.line_out_time = 0
+        # Execute movement based on line position
+        if position == "left":
+            if is_debug:
+                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
+        elif position == "right":
+            if is_debug:
+                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
+        else:
+            if is_debug:
+                debug_print(("Direction:", position, "Power:", power), action="line_track", msg="Following line")
+        # Small delay to avoid overwhelming the motors
+        sleep(0.1)
+        return position
+
 
 if __name__ == "__main__":
     pass

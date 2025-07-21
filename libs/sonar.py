@@ -72,7 +72,7 @@ def set_sonar_scan_config(scan_range=None,step=None):
         item+=1
     else:
         sonar_step=int(step)
-    if item is 2: # if nothing change, return
+    if item == 2: # if nothing change, return
         return
     
     # re-create the data list
