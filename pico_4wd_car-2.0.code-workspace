@@ -1,10 +1,18 @@
 {
-  "folders": [
-    {
-      "path": "."
-    }
-  ],
-  "settings": {
-    "python.languageServer": "Pylance"
-  }
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "Mpy Remote Workspace",
+			"uri": "pico:"
+		}
+	],
+	"settings": {
+		"python.languageServer": "Pylance",
+		"python.analysis.diagnosticSeverityOverrides": {
+			"reportMissingModuleSource": "none",
+			"reportShadowedImports": "none"
+		}
+	}
 }

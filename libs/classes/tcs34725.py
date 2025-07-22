@@ -78,8 +78,20 @@ class TCS34725:
             print("<scl> and <sca> must be specified as Pin objects!")
             return
         self.__Bus = SoftI2C(scl=scl, sda=sda, freq=freq)
+        # try:
+        self.__Bus.start()
+        # self.__Bus.stop()
+        # self.__Bus.writeto(TCSREG_ENABLE, b'\x80')            # Test write
+        test_buf = bytearray(1)
+        test_buf[0] = 0x80
+        # acks = self.__Bus.write(test_buf)
+        # print(acks)
+        self.__Bus.writeto(0x29, bytes([TCSREG_ID]))
+        # devices = self.__Bus.scan()
+        # print(devices)
+        # except OSError:
+        #     print("Error writing to device")
         try:
-            self.__Bus.writeto(self.__addr, b'\x80')            # Test write
             self.__Bus.readfrom_into(self.__addr, self.__buf1)
         except OSError:
             print("Failed to connect to device with I2C address 0x{:02x}".format(self.__addr))
@@ -285,3 +297,8 @@ class TCS34725:
         """Start the device by enabling power and ADC."""
         # Use the constants instead of hardcoded values
         return self.__write_register(TCSREG_ENABLE, TCSCMD_POWER_ON | TCSCMD_AEN)
+
+
+if __name__ == "__main__":
+    sensor = TCS34725(scl=Pin(5), sda=Pin(4))
+    # print(sensor.isconnected)

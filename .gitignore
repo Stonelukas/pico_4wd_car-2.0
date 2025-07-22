@@ -5,3 +5,7 @@
 uv.lock
 micropython-lib
 libs/main.py
+pyproject.toml
+pyproject.toml
+circuitpython/README.md
+pyproject.toml
