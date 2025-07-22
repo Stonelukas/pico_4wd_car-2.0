@@ -71,7 +71,7 @@ class TCS34725:
         self.__id = 0x00                               # Device id
         self.__autogain = False
         self.__connected = False
-        if scl == None or sda == None:
+        if scl is None or sda is None:
             print("<scl> and <sca> are required parameters!")
             return
         if not (isinstance(scl, Pin) and isinstance(sda, Pin)):
@@ -144,7 +144,8 @@ class TCS34725:
             return None
 
     def __adjustgain_one_step(self, counts):
-        """ adjust gain (if possible!) when a certain count limits are reached:
+        """ 
+            adjust gain (if possible!) when a certain count limits are reached:
             <counts> is tuple of 4 integers
             switch to lower gain when highest count exceeds 85% of maximum
             switch to higher gain when highest count is below 15% of maximum
@@ -196,7 +197,11 @@ class TCS34725:
     
     @gain.setter 
     def gain(self, gain):
-        """ set gain code (0..3), forced to a value within limits """
+        """ 
+        set gain code, forced to a value within limits 
+        Args:
+            gain: gain code (0..3)
+        """
         self.__gain = max(TCSGAIN_MIN, min(TCSGAIN_MAX, gain))
         self.__write_register(TCSREG_CONTROL, self.gain)
         sleep_ms(2 * self.integration_time)
@@ -213,8 +218,12 @@ class TCS34725:
     
     @autogain.setter
     def autogain(self, autogain_new):
-        """ set autogain setting (True/False) """
-        self.__autogain = True if autogain_new == True else False
+        """ 
+        set autogain setting.
+        Args:
+            autogain_new: new autogain value
+        """
+        self.__autogain = True if autogain_new is True else False
 
     @property
     def integ(self):
@@ -223,7 +232,10 @@ class TCS34725:
     
     @integ.setter
     def integ(self, integ):
-        """ set integrationtime code (255..0), forced to a value within limits """
+        """ set integrationtime code, forced to a value within limits 
+        Args:
+            integ: integrationtime code value between 0-255.
+        """
         self.__integ = max(TCSINTEG_MAX, min(TCSINTEG_MIN, integ))
         self.__write_register(TCSREG_ATIME, self.__integ)
         sleep_ms(2 * self.integration_time)
@@ -266,7 +278,13 @@ class TCS34725:
         print(f"Devices found: \r \n {results}")
         
     def read_all(self, addr, length):
-        """Read data from the device."""
+        """
+        Read data from the device.
+
+        Args:
+            addr: Address to read from on the I2C Bus.
+            length: the length to read from the Address.
+        """
         try:
             # Select channel using the switch_channel method for consistency
             return self.__Bus.readfrom_mem(addr, 0x00, length)
@@ -275,9 +293,13 @@ class TCS34725:
             return None
     
     def write(self, data):
-        """Write data directly to the bus (after selecting channel)."""
+        """
+        Write data directly to the bus (after selecting channel).
+        
+        Args:
+            data: data to write to the bus starting at address 0x00
+        """
         try:
-            # Select channel using the switch_channel method for consistency
             # Pass data through to i2c instance
             return self.__Bus.write(data)
         except Exception as err:
@@ -285,7 +307,13 @@ class TCS34725:
             return False
     
     def writeto(self, addr, data):
-        """Write data to a specific address (after selecting channel)."""
+        """
+        Write data to a specific address (after selecting channel).
+
+        Args:
+            addr: Address to write to the I2C Bus.
+            data: Data to send to the Address on the I2C Bus.
+        """
         try:
             # Select channel using the switch_channel method for consistency
             return self.__Bus.writeto(addr, data)

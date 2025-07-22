@@ -22,7 +22,6 @@ from classes.grayscale import Grayscale
 from ws import WS_Server
 from machine import Pin
 from classes.follow import Follow
-from random_line import random_line
 
 VERSION = '1.3.0'
 print(f"[ Pico-4WD Car App Control {VERSION}]\n")
@@ -92,6 +91,8 @@ start_line_track = False
 _start_line_track_printed = False 
 line_track_active = False
 line_status = None
+hub_started = False
+to_destination = False
 
 lights_brightness = 0.2
 led_rear_min_brightness = 0.08
@@ -142,6 +143,7 @@ except Exception as e:
 
 '''----------------- Helper Functions ---------------------'''
 
+# TODO: Not working.
 def should_exit_operation(operation_type="general"):
     """
     Universal exit condition checker for various operations.
@@ -220,9 +222,10 @@ def should_exit_with_cleanup(operation_type="general", cleanup_function=None):
 
 def cleanup_line_track():
     """Cleanup actions for exiting line track mode."""
-    global move_status, line_status, line_track_active
+    global move_status, line_status, line_track_active, mode
     stop()
     move_status = 'stop'
+    mode = None
     line_status = None
     line_track_active = False
     if get_debug():
@@ -235,6 +238,7 @@ def cleanup_lights():
     brake_light_status = False
     signal_blink_state = False
     # Add hardware-specific light-off code here if needed
+    lights.set_off()
     if get_debug():
         debug_print("Lights cleanup executed", action="cleanup", msg="Lights")
 
@@ -266,8 +270,7 @@ def my_car_move(throttle_power, steer_power, gradually=False):
 '''----------------- color_line_track ---------------------'''
 
 def hub():
-    global line_out_time, move_status, line_status, line_track_active
-    global left_color, middle_color, right_color
+    global line_out_time, move_status, line_status, line_track_active, hub_started
     _power = LINE_TRACK_POWER
 
     line_track_active = True
@@ -276,83 +279,62 @@ def hub():
     if should_exit_with_cleanup("line_track", cleanup_line_track):
         return
 
-    if left_color != "grün" and middle_color != "grün" and right_color != "grün":
-        print("Auto ist nicht im Hub.")
-    else:
-        if middle_color == "grün" and left_color != "grün":
-            move('forward', _power)
-            move_status = 'forward'
-            move('turn_in_place_right', _power)
-            move_status = 'turn_in_place_right'
-            
-            while not (left_color == "grün" and middle_color == "grün" and right_color == sensors.target_color):
-                # Check exit conditions in the loop
-                if should_exit_with_cleanup("line_track", cleanup_line_track):
-                    return
-                    
-                if left_color == "grün" and middle_color == "grün":
-                    move('forward', _power)
-                    move_status = 'forward'
-                elif left_color == "grün":
-                    move('left', _power)
-                    move_status = 'left'
-                
-                # Update sensor readings
-                left_color = sensors.get_color_str()[0]
-                middle_color = sensors.get_color_str()[1]
-                right_color = sensors.get_color_str()[2]
-                
-                # Small delay to make loop responsive
-                time.sleep(0.01)
-                
-            stop()
-            line_status = 'target found'
+    if not hub_started and sensors.hub_control_start("Green"):
+        hub_started = True
+        move("forward", _power)
+        time.sleep_ms(100)
+        # TODO: Check how long it takes for a 90° Turn. or stop turning when the right sensor is not in the hub anymore (not green)
+        move("turn in place right", _power) 
+        time.sleep(1)
 
-
-def line_track(way_back=None):
-    global line_out_time, move_status, line_status, line_track_active, left_color, middle_color, right_color
-    _power = LINE_TRACK_POWER
     
-    destination_cond = (middle_color == 'terracotta' and left_color == 'terracotta' and right_color == 'terracotta') 
-    way_back_cond = (middle_color == 'grün' and left_color == 'grün' and right_color == 'grün')
+    direction = sensors.hub_find_line("Green")
+    right_color = sensors.get_color_str()[2]
 
-    if way_back:
-        cond = way_back_cond
-    else:
-        cond = destination_cond
+    if hub_started:
+        # move into to the direction from the method hub_find_line() only if the right sensor did not detect the target color.
+        if not right_color == sensors.target_color:
+            move(direction, _power)
+        else: 
+            stop()
+            line_status = "target found"
+            hub_started = False
 
-    if not cond:
-        while not (middle_color == sensors.target_color and left_color == sensors.target_color and right_color == sensors.target_color):
-            # Check exit conditions in the loop
-            if should_exit_with_cleanup("line_track", cleanup_line_track):
-                return
-                
-            if middle_color == sensors.target_color:
-                move('forward', _power)
-                move_status = 'forward'
-            elif right_color == sensors.target_color:
-                move('right', _power)
-                move_status = 'right'
-            elif left_color == sensors.target_color:
-                move('left', _power)
-                move_status = 'left'
-            
-            # Update sensor readings
-            left_color = sensors.get_color_str()[0]
-            middle_color = sensors.get_color_str()[1]
-            right_color = sensors.get_color_str()[2]
-            
-            # Small delay to make loop responsive
-            time.sleep(0.01)
-            
+def line_track():
+    global line_out_time, move_status, line_status, line_track_active, to_destination
+    _power = LINE_TRACK_POWER
+
+    if should_exit_with_cleanup("line_track", cleanup_line_track):
+        return
+
+    direction = sensors.follow_line(_power)
+    if line_status == "target found":
+        left_sensor, middle_sensor, right_sensor = sensors.color_match_bool("terracotta")
+        # True if all Sensors detect terracotta
+        to_destination = left_sensor and middle_sensor and right_sensor
+    elif line_status == "line end":
+        left_sensor, middle_sensor, right_sensor = sensors.color_match_bool("green")
+        # True if all Sensore detect Green
+        hub_reached = left_sensor and middle_sensor and right_sensor
+
+    # Move in the direction returned from the method follow_line()
+    move(direction, _power)
+    line_track_active = True
+
+    if direction == "stop":
+        line_status = "out of line"
+        return    
+    if to_destination:
         stop()
-        move_status = 'stop'
-        if way_back:
-            line_status = 'finish'
-        else:
-            line_status = 'line end'
-            line_track_active = False
+        line_status = "line end"
+    if hub_reached:
+        stop()
+        line_status = "finish"
+        to_destination = False
+        hub_reached = False
 
+
+# TODO: Mit der Gruppe absprechen wie wir am ende einer Farbigen Linie das auto drehen. 
 def line_track_end():
     global move_status, line_status, left_color, middle_color, right_color
     _power = LINE_TRACK_POWER
@@ -381,49 +363,6 @@ def line_track_end():
         time.sleep(0.01)
         
     line_status = "way back"
-
-# def color_line_track(rgb=None):
-#     """Track a colored line using the color sensors.
-    
-#     Args:
-#         rgb: Optional tuple of (R, G, B) values for the line color.
-#              If not provided, the default target color will be used.
-    
-#     Returns:
-#         None
-#     """
-#     global move_status
-    
-#     # Only execute if we're actually in line track mode
-#     if mode != 'line track':
-#         return
-        
-#     # Example: channels 1, 2, 3 and a red line (adjust as needed)
-#     target_rgb = rgb or (255, 0, 0)  # Default to red if no color is provided
-    
-#     # Update the target color to track
-#     sensors.target_color = target_rgb
-    
-#     # Get the car's movement direction from the follow_line function
-#     # Pass the current mode to ensure debug prints only happen in line_track mode
-#     new_move_status = sensors.follow_line(power=LINE_TRACK_POWER, current_mode=mode)
-    
-#     # Only update move_status if we got a valid status
-#     if new_move_status is not None:
-#         move_status = new_move_status
-
-# def auto_color_line_track():
-#     """ Scan for a Color on the middle Sensor and use that as the Target RGB to follow. """
-#     global move_status
-    
-#     # Only execute if we're actually in line track mode
-#     if mode != 'line track':
-#         return
-
-#     target_rgb = sensors.get_color(current_mode=mode)
-#     if get_debug():
-#         debug_print(f"Auto-tracking color: {target_rgb}", action="line_track", msg="Auto Color Track")
-#     color_line_track(target_rgb)
 
 
 '''----------------- singal_lights_handler ---------------------'''
@@ -522,9 +461,8 @@ def on_receive(data):
     # ws.send_dict['M'] = sensors.get_color_rgb_convert()[0] # Red component
     # ws.send_dict['Q'] = sensors.get_color_rgb_convert()[1] # Green component
     # ws.send_dict['R'] = sensors.get_color_rgb_convert()[2] # Blue component
-    # TODO: Add data to send to the app
     # 0 = Line Color off, 1 = Line Color on
-    ws.send_dict['J'] = 1 if sensors.color_match(sensors.__get_color_rgb(current_mode=mode), current_mode=mode) else 0
+    ws.send_dict['J'] = 1 if sensors.color_match(sensors.__get_color_rgb(current_mode=mode), sensors.target_color_rgb) else 0
 
     ''' remote control'''
     # Move - power
@@ -579,7 +517,7 @@ def on_receive(data):
         lights_brightness = led_rear_max_brightness
 
     if 'G' in data.keys() and start:
-        if data['G'] == True:
+        if data['G'] is True:
             if not start_line_track:
                 start_line_track = True
                 # Print once to indicate start
@@ -593,14 +531,15 @@ def on_receive(data):
                 _start_line_track_printed = False
                 print("Line Track Mode Disabled")
 
+    # TODO: adapt to the new follow_line method (Follow class - line track functions)
     # start line color tracking until returned to hub
     if 'I' in data.keys() and start and start_line_track and data['I']:
         if not line_track_active:
             mode = 'line track'
             line_status = None
-        else:
-            if line_status == 'line end':
-                line_track_end()
+        if line_track_active and line_status is None:
+            line_status = "start"
+
             
 
 
@@ -623,11 +562,6 @@ def on_receive(data):
             # sensors.target_color = "Orange"
             print("orange")
             # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
-        if ["T"] in data.keys() and data["T"] and not line_track_active:
-            #
-            random_farbe = random_line()
-            sensors.target_color = random_farbe
-            # print(f"Set target color to {sensors.target_color.upper()} with RGB values of {sensors.target_color_rgb}")
 
 
 
@@ -641,7 +575,7 @@ def on_receive(data):
     #     machine.freq() # get current frequency
     
     if 'E' in data.keys():
-        if data['E'] == True:
+        if data['E'] is True:
             if not start:
                 start = True
                 # Print once to indicate start
@@ -661,14 +595,7 @@ def remote_handler():
     global mode, throttle_power, steer_power, move_status, dpad_touched
     global sonar_angle, sonar_distance
     global lights_brightness
-    global left_color, middle_color, right_color, start_line_track, line_track_active
-
-    ''' Debug print '''
-    # if debug and mode is None:
-        # debug_print(("Motor Power:", throttle_power, "Steer Power:", steer_power, "Move Status:", move_status, "Sonar Angle:", sonar_angle, "Sonar Distance:", sonar_distance, "Grayscale Value:", grayscale.get_value(), "Lights Brightness:", lights_brightness), mode, msg='Remote Handler Data')
-        # sonar.servo.set_angle(0)  # Allow sonar to move
-        # mode = None  # Stop mode if debug mode is on
-        
+    global left_color, middle_color, right_color, start_line_track, line_track_active, line_status
 
     ''' if not connected, skip & stop '''
     if not ws.is_connected() or not start:
@@ -681,14 +608,16 @@ def remote_handler():
 
     ''' mode: Line Track or Obstacle Avoid or Follow '''
     if not dpad_touched and start_line_track:
-        if mode == 'line track':
+        if mode == 'line track' and line_status == "start":
             hub()
-            if line_status == 'target found':
+            if line_status == 'target found' or line_status == "line end":
                 line_track()
-            elif line_status == 'way back':
-                line_track(way_back=True)
-            elif line_status == 'line end':
-                mode = 'line track enabled'
+            if line_status == "out of line":
+                # TODO: mit der Gruppe besprechen was passieren soll wenn das auto die farbige linie verloren hat. 
+                pass
+            if line_status == "finish":
+                print("line track finished")
+                line_status = None
 
 
 
@@ -730,4 +659,3 @@ if __name__ == "__main__":
             onboard_led.off()
             time.sleep(0.25)
             onboard_led.on()
-

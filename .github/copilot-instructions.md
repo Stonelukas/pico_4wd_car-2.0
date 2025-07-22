@@ -143,3 +143,8 @@ elif n_on:
 6. **Custom Line Tracking**:
    - Use `color_line_track(rgb)` with a custom RGB tuple to follow specific colored lines
    - Auto color tracking is available via `auto_color_line_track()` which detects line color automatically
+[byterover-mcp]
+
+# important 
+always use byterover-retrive-knowledge tool to get the related context before any tasks 
+always use byterover-store-knowledge to store all the critical informations after sucessful tasks

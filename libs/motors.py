@@ -50,12 +50,12 @@ def move(action, power=0):
         set_motors_power_gradually([power, -power, power, -power])
     elif action == "stop":
         set_motors_power([0, 0, 0, 0])
-    elif action == "turn_in_place_left":
+    elif action == "turn in place left":
         set_motors_power_gradually([-power, power, -power, power])
-    elif action == "turn_in_place_right":
+    elif action == "turn in place right":
         set_motors_power_gradually([power, -power, power, -power])
     else:
-        raise ValueError("Invalid action. Use 'forward', 'backward', 'left', 'right', 'stop', 'turn_in_place_left', or 'turn_in_place_right'.")
+        raise ValueError("Invalid action. Use 'forward', 'backward', 'left', 'right', 'stop', 'turn in place left', or 'turn in place right'.")
 
 
 if __name__ == "__main__":

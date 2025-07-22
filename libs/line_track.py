@@ -3,9 +3,8 @@ This example adds the N widget for line track.
 "A" widget for display greyscale work.
 '''
 
-import time
 from motors import move, stop
-from machine import I2C, Pin
+from machine import Pin
 
 # line track
 line_out_time = 0

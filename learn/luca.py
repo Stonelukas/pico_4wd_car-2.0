@@ -1,0 +1,1 @@
+liste = [None] * 10
