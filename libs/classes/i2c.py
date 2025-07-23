@@ -63,7 +63,7 @@ class MyI2C(Lockable):
 
     
     def readfrom_into(self, addr, buffer):
-        return self.__Bus.readfrom_into(addr, buffer, stop=True)
+        return self.__Bus.readfrom_into(addr=None, buffer=None, stop=True)
     
     def readfrom_mem_into(self, addr, memaddr, buffer):
         """Read from memory into buffer."""

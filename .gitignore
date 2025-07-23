@@ -9,3 +9,4 @@ circuitpython/README.md
 pyproject.toml
 .mypy_cache
 .github
+libs/lib/

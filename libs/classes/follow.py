@@ -1,15 +1,14 @@
 # filepath: libs/classes/follow.py
 import time
 from time import sleep
-from machine import Pin
+from machine import Pin, SoftI2C
 from helper import debug_print, get_debug
 from typing import Optional, Union, Tuple, Any
 
-from classes.tcs34725 import TCS34725, TCSGAIN_LOW, TCSINTEG_MEDIUM
-from classes.i2c import MyI2C
+from classes.new_tcs import TCS34725, TCSGAIN_LOW, TCSINTEG_MEDIUM
 
 class Follow:
-    def __init__(self, target_rgb):
+    def __init__(self, target_rgb, standalone: bool = False,):
         """
         Initialize the Follow class for line tracking with color sensors.
         
@@ -20,29 +19,35 @@ class Follow:
             target_rgb: Target RGB color to follow (default red)
         """
         print("Starting tcs34725")
-        self.i2c_instance = MyI2C()
+        self.standalone = standalone
 
         # Initialize sensors with proper channel values and shared I2C instance
-        self.left_sensor = TCS34725(scl=Pin(2), sda=Pin(3))
-        self.middle_sensor = TCS34725(scl=Pin(4), sda=Pin(5))
-        self.right_sensor = TCS34725(scl=Pin(6), sda=Pin(7))
-
-        # Set default gain and integration time for each sensor
-        for sensor in (self.left_sensor, self.middle_sensor, self.right_sensor):
-            sensor.gain = TCSGAIN_LOW # Low gain
-            sensor.integ = TCSINTEG_MEDIUM # ~40 ms integration time
+        if not self.standalone:
+            self.left_sensor = TCS34725(SoftI2C(scl=Pin(3), sda=Pin(2)))
+            self.middle_sensor = TCS34725(SoftI2C(scl=Pin(5), sda=Pin(4)))
+            self.right_sensor = TCS34725(SoftI2C(scl=Pin(7), sda=Pin(6)))
+            # Set default gain and integration time for each sensor
+            for sensor in (self.left_sensor, self.middle_sensor, self.right_sensor):
+                sensor.gain = TCSGAIN_LOW # Low gain
+                sensor.integ = TCSINTEG_MEDIUM # ~40 ms integration time
+        else:
+            self.sensor = TCS34725(SoftI2C(scl=Pin(3), sda=Pin(2)))
+            self.sensor.gain = TCSGAIN_LOW # Low gain
+            self.sensor.integ = TCSINTEG_MEDIUM # ~40 ms integration time
 
         # Validate and set target RGB tuple (R, G, B)
         self.target_rgb = self._validate_rgb(target_rgb)
         
-        # Color mapping for string conversion
+        # Color mapping for string conversion - adjusted for realistic sensor readings
         self.color_map = {
-            "lila": (111, 95, 132),
-            "blau": (61, 146, 175),
-            "grün": (153, 182, 57),
-            "gelb": (229, 174, 47),
-            "orange": (232, 120, 45),
-            "terracotta": (192, 99, 81)
+            "lila": (111, 95, 132),     # Purple/Violet - adjusted for sensor
+            "blau": (61, 146, 175),     # Blue - adjusted for sensor  
+            "grün": (153, 182, 57),      # Green - adjusted for sensor
+            "gelb": (229, 174, 47),      # Yellow - adjusted for sensor
+            "orange": (232, 120, 45),    # Orange - adjusted for sensor
+            "terracotta": (192, 99, 81), # Terracotta - adjusted for sensor
+            "weiss": (255, 255, 255),     # White - for calibration
+            "schwarz": (50, 50, 50),      # Dark/Black - for low light
         }
         self.rgb_to_color = {v: k for k, v in self.color_map.items()}
         
@@ -109,7 +114,22 @@ class Follow:
         
         return closest_color
     
-    def _read_sensor(self, sensor: Any) -> Tuple[int, int, int]:
+    def read_raw(self, sensor: Any = None) -> Tuple[int, int, int, int]:
+        """Read raw ADC values from sensor without conversion
+        
+        Args:
+            sensor: The sensor to read from (None for standalone mode)
+            
+        Returns:
+            Tuple[int, int, int, int]: Raw ADC values (r, g, b, clear)
+        """
+        if self.standalone:
+            raw_values = self.sensor.read()
+        else:
+            raw_values = sensor.read() if sensor else self.middle_sensor.read()
+        return raw_values
+    
+    def _read_sensor(self, sensor: Any = None) -> Tuple[int, int, int]:
         """ Read color values from the specified sensor
 
         Args:
@@ -118,8 +138,502 @@ class Follow:
         Returns:
             Tuple[int, int, int]: Tuple of the 3 color values read from the sensor (R, G, B)
         """
-        return sensor.color_raw[:3] # (R, G, B)
+        if self.standalone:
+            # If standalone, read from the single sensor instance
+            raw_values = self.sensor.read()  # Returns (r, g, b, clear)
+        else:
+            raw_values = sensor.read()  # Returns (r, g, b, clear)
+        
+        # Convert raw ADC values to standard RGB (0-255)
+        return self._raw_to_rgb(raw_values[0], raw_values[1], raw_values[2], raw_values[3])
     
+    def _raw_to_rgb(self, r_raw: int, g_raw: int, b_raw: int, clear_raw: int) -> Tuple[int, int, int]:
+        """Convert raw ADC values from TCS34725 to standard RGB (0-255)
+        
+        This uses a better algorithm that doesn't always push values to white.
+        
+        Args:
+            r_raw: Raw red ADC value (may be int or tuple)
+            g_raw: Raw green ADC value (may be int or tuple)
+            b_raw: Raw blue ADC value (may be int or tuple)
+            clear_raw: Raw clear/total light ADC value (may be int or tuple)
+            
+        Returns:
+            Tuple[int, int, int]: Standard RGB values (0-255)
+        """
+        # Ensure we have integers, not tuples
+        def extract_int(value):
+            if isinstance(value, tuple):
+                return int(value[0]) if len(value) > 0 else 0
+            return int(value)
+        
+        r_raw = extract_int(r_raw)
+        g_raw = extract_int(g_raw)
+        b_raw = extract_int(b_raw)
+        clear_raw = extract_int(clear_raw)
+            
+        if clear_raw == 0:
+            return (0, 0, 0)
+        
+        # Method 1: Simple ratio normalization (better for color detection)
+        # Normalize each channel against the clear channel to get relative intensities
+        r_ratio = r_raw / clear_raw
+        g_ratio = g_raw / clear_raw  
+        b_ratio = b_raw / clear_raw
+        
+        # Apply a scaling factor to get meaningful RGB values
+        # This factor can be adjusted based on your lighting conditions
+        scale_factor = 600  # Adjust this value based on your sensor readings
+        
+        r = int(r_ratio * scale_factor)
+        g = int(g_ratio * scale_factor)
+        b = int(b_ratio * scale_factor)
+        
+        # Clamp values to 0-255 range
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
+        
+        return (r, g, b)
+    
+    def _raw_to_rgb_alternative(self, r_raw: int, g_raw: int, b_raw: int, clear_raw: int) -> Tuple[int, int, int]:
+        """Alternative RGB conversion method - removes illumination effects
+        
+        This method removes the illumination component to get purer color representation.
+        
+        Args:
+            r_raw: Raw red ADC value
+            g_raw: Raw green ADC value
+            b_raw: Raw blue ADC value
+            clear_raw: Raw clear ADC value
+            
+        Returns:
+            Tuple[int, int, int]: RGB values (0-255)
+        """
+        # Ensure we have integers
+        def extract_int(value):
+            if isinstance(value, tuple):
+                return int(value[0]) if len(value) > 0 else 0
+            return int(value)
+        
+        r_raw = extract_int(r_raw)
+        g_raw = extract_int(g_raw)
+        b_raw = extract_int(b_raw)
+        clear_raw = extract_int(clear_raw)
+        
+        if clear_raw == 0:
+            return (0, 0, 0)
+        
+        # Calculate illumination-corrected values
+        # This removes the white light component
+        illumination = clear_raw - max(r_raw, g_raw, b_raw)
+        
+        # Subtract illumination from each channel
+        r_corrected = max(0, r_raw - illumination * 0.3)  # Adjust factors as needed
+        g_corrected = max(0, g_raw - illumination * 0.3)
+        b_corrected = max(0, b_raw - illumination * 0.3)
+        
+        # Find the sum for normalization
+        total = r_corrected + g_corrected + b_corrected
+        
+        if total == 0:
+            return (85, 85, 85)  # Return neutral gray if no color
+        
+        # Normalize to 0-255 range while preserving color ratios
+        scale = 255 / total
+        r = int(r_corrected * scale)
+        g = int(g_corrected * scale)
+        b = int(b_corrected * scale)
+        
+        return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+    
+    def _raw_to_rgb_simple(self, r_raw: int, g_raw: int, b_raw: int, clear_raw: int) -> Tuple[int, int, int]:
+        """Simple RGB conversion - direct scaling
+        
+        Args:
+            r_raw: Raw red ADC value
+            g_raw: Raw green ADC value
+            b_raw: Raw blue ADC value
+            clear_raw: Raw clear ADC value (unused in this method)
+            
+        Returns:
+            Tuple[int, int, int]: RGB values (0-255)
+        """
+        # Ensure we have integers
+        def extract_int(value):
+            if isinstance(value, tuple):
+                return int(value[0]) if len(value) > 0 else 0
+            return int(value)
+        
+        r_raw = extract_int(r_raw)
+        g_raw = extract_int(g_raw)
+        b_raw = extract_int(b_raw)
+        
+        # Find the maximum value for scaling
+        max_val = max(r_raw, g_raw, b_raw)
+        
+        if max_val == 0:
+            return (0, 0, 0)
+        
+        # Scale to 0-255 range
+        scale = 255 / max_val
+        r = int(r_raw * scale)
+        g = int(g_raw * scale)
+        b = int(b_raw * scale)
+        
+        return (r, g, b)
+    
+    def calibrate_white_balance(self, sensor: Any = None) -> Tuple[int, int, int, int]:
+        """Calibrate white balance by reading a white surface
+        
+        Args:
+            sensor: The sensor to calibrate (None for standalone mode)
+            
+        Returns:
+            Tuple[int, int, int, int]: White balance calibration values (r, g, b, clear)
+        """
+        print("Point sensor at a white surface and press Enter...")
+        try:
+            user_input = input()  # Wait for user input
+            print(f"Received input: '{user_input}'")  # Debug feedback
+        except Exception as e:
+            print(f"Input error: {e}")
+            print("Proceeding without user confirmation...")
+        
+        if self.standalone:
+            white_values = self.sensor.read()
+        else:
+            white_values = sensor.read()
+            
+        print(f"White calibration values: R={white_values[0]}, G={white_values[1]}, B={white_values[2]}, Clear={white_values[3]}")
+        return white_values
+    
+    def test_and_calibrate_colors(self, sensor: Any = None) -> dict:
+        """Test all colors in the color_map and allow adjustment of RGB values
+        
+        This method will guide you through testing each color in your color_map
+        and allow you to update the RGB values based on actual sensor readings.
+        
+        Args:
+            sensor: The sensor to use for testing (None for standalone mode)
+            
+        Returns:
+            dict: Updated color_map with new RGB values
+        """
+        print("=== Color Calibration Tool ===")
+        print("This tool will help you calibrate each color in your color_map.")
+        print("For each color, point the sensor at that color and press Enter.")
+        print("You can then choose to update the RGB values or keep the current ones.\n")
+        
+        updated_color_map = self.color_map.copy()
+        
+        for color_name, current_rgb in self.color_map.items():
+            print(f"\n--- Testing Color: {color_name.upper()} ---")
+            print(f"Current RGB values: {current_rgb}")
+            print(f"Point the sensor at a {color_name} surface and press Enter...")
+            
+            try:
+                try:
+                    user_input = input()  # Wait for user
+                    print(f"Received input: '{user_input}'")  # Debug feedback
+                except (OSError, KeyboardInterrupt) as input_error:
+                    print(f"Input error: {input_error}")
+                    print("Proceeding without user confirmation...")
+                
+                # Read current sensor values
+                if self.standalone:
+                    raw_values = self.sensor.read()
+                else:
+                    raw_values = sensor.read() if sensor else self.middle_sensor.read()
+                
+                converted_rgb = self._raw_to_rgb(raw_values[0], raw_values[1], raw_values[2], raw_values[3])
+                distance_to_current = self._color_distance(converted_rgb, current_rgb)
+                
+                print(f"Raw sensor reading: R={raw_values[0]}, G={raw_values[1]}, B={raw_values[2]}, Clear={raw_values[3]}")
+                print(f"Converted RGB: {converted_rgb}")
+                print(f"Distance to current {color_name}: {distance_to_current:.2f}")
+                
+                # Ask if user wants to update
+                while True:
+                    try:
+                        choice = input(f"Update {color_name} RGB values? (y/n/m for manual): ").lower().strip()
+                    except (OSError, KeyboardInterrupt):
+                        print("Input error, using default choice 'n'")
+                        choice = 'n'
+                    
+                    if choice == 'y':
+                        updated_color_map[color_name] = converted_rgb
+                        print(f"✓ Updated {color_name}: {current_rgb} → {converted_rgb}")
+                        break
+                    elif choice == 'n':
+                        print(f"✓ Kept original {color_name}: {current_rgb}")
+                        break
+                    elif choice == 'm':
+                        # Manual RGB input
+                        try:
+                            print("Enter RGB values manually (format: r,g,b):")
+                            try:
+                                manual_input = input("RGB: ").strip()
+                            except (OSError, KeyboardInterrupt):
+                                print("Input error, skipping manual entry")
+                                break
+                            r, g, b = map(int, manual_input.split(','))
+                            manual_rgb = (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+                            updated_color_map[color_name] = manual_rgb
+                            print(f"✓ Manually set {color_name}: {current_rgb} → {manual_rgb}")
+                            break
+                        except ValueError:
+                            print("Invalid format. Use: r,g,b (e.g., 255,128,64)")
+                    else:
+                        print("Please enter 'y', 'n', or 'm'")
+                        
+            except KeyboardInterrupt:
+                print(f"\nSkipping {color_name}...")
+                continue
+            except Exception as e:
+                print(f"Error reading {color_name}: {e}")
+                continue
+        
+        print("\n=== Calibration Complete ===")
+        print("Updated color map:")
+        for color_name, rgb_values in updated_color_map.items():
+            old_values = self.color_map[color_name]
+            if rgb_values != old_values:
+                print(f"  {color_name}: {old_values} → {rgb_values} ✓")
+            else:
+                print(f"  {color_name}: {rgb_values} (unchanged)")
+        
+        # Ask if user wants to apply changes
+        while True:
+            apply = input("\nApply these changes to the color_map? (y/n): ").lower().strip()
+            if apply == 'y':
+                self.color_map = updated_color_map
+                self.rgb_to_color = {v: k for k, v in self.color_map.items()}
+                print("✓ Color map updated!")
+                break
+            elif apply == 'n':
+                print("✓ Changes discarded, original color map kept.")
+                break
+            else:
+                print("Please enter 'y' or 'n'")
+        
+        return updated_color_map
+    
+    def save_color_map(self, filename: str = "color_calibration.py") -> None:
+        """Save the current color_map to a Python file
+        
+        Args:
+            filename: Name of the file to save to
+        """
+        try:
+            with open(filename, 'w') as f:
+                f.write("# Auto-generated color calibration file\n")
+                f.write("# Generated by Follow.save_color_map()\n\n")
+                f.write("color_map = {\n")
+                for color_name, rgb_values in self.color_map.items():
+                    f.write(f'    "{color_name}": {rgb_values},\n')
+                f.write("}\n\n")
+                f.write("# To use: sensor.load_color_map('color_calibration.py')\n")
+            print(f"✓ Color map saved to {filename}")
+        except Exception as e:
+            print(f"Error saving color map: {e}")
+    
+    def load_color_map(self, filename: str = "color_calibration.py") -> bool:
+        """Load color_map from a Python file
+        
+        Args:
+            filename: Name of the file to load from
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Read the file and extract the color_map
+            with open(filename, 'r') as f:
+                content = f.read()
+            
+            # Execute the file content to get the color_map
+            namespace = {}
+            exec(content, namespace)
+            
+            if 'color_map' in namespace:
+                self.color_map = namespace['color_map']
+                self.rgb_to_color = {v: k for k, v in self.color_map.items()}
+                print(f"✓ Color map loaded from {filename}")
+                print("Loaded colors:")
+                for color_name, rgb_values in self.color_map.items():
+                    print(f"  {color_name}: {rgb_values}")
+                return True
+            else:
+                print(f"Error: No 'color_map' found in {filename}")
+                return False
+        except FileNotFoundError:
+            print(f"Error: File {filename} not found")
+            return False
+        except Exception as e:
+            print(f"Error loading color map: {e}")
+            return False
+    
+    def test_single_color(self, color_name: str, sensor: Any = None) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int], float]:
+        """Test a single color and compare with current color_map value
+        
+        Args:
+            color_name: Name of the color to test
+            sensor: The sensor to use (None for standalone mode)
+            
+        Returns:
+            Tuple containing (raw_values, converted_rgb, distance_to_current)
+        """
+        if color_name.lower() not in self.color_map:
+            raise ValueError(f"Color '{color_name}' not found in color_map. Available colors: {list(self.color_map.keys())}")
+        
+        color_name = color_name.lower()
+        current_rgb = self.color_map[color_name]
+        
+        print(f"\n--- Testing {color_name.upper()} ---")
+        print(f"Current RGB: {current_rgb}")
+        print(f"Point sensor at {color_name} surface and press Enter...")
+        try:
+            user_input = input()
+            print(f"Received input: '{user_input}'")  # Debug feedback
+        except (OSError, KeyboardInterrupt) as e:
+            print(f"Input error: {e}")
+            print("Proceeding without user confirmation...")
+        
+        # Read sensor
+        if self.standalone:
+            raw_values = self.sensor.read()
+        else:
+            raw_values = sensor.read() if sensor else self.middle_sensor.read()
+        
+        converted_rgb = self._raw_to_rgb(raw_values[0], raw_values[1], raw_values[2], raw_values[3])
+        distance = self._color_distance(converted_rgb, current_rgb)
+        
+        print(f"Raw reading: R={raw_values[0]}, G={raw_values[1]}, B={raw_values[2]}, Clear={raw_values[3]}")
+        print(f"Converted RGB: {converted_rgb}")
+        print(f"Distance to current: {distance:.2f}")
+        print(f"Match threshold: {self.color_threshold}")
+        print(f"Would match: {'✓ YES' if distance < self.color_threshold else '✗ NO'}")
+        
+        return raw_values, converted_rgb, distance
+    
+    def print_color_distances(self, test_rgb: Tuple[int, int, int]) -> None:
+        """Print distances from test_rgb to all colors in color_map
+        
+        Args:
+            test_rgb: RGB tuple to compare against all colors
+        """
+        print(f"\nDistances from RGB {test_rgb} to all colors:")
+        print("-" * 50)
+        
+        distances = []
+        for color_name, color_rgb in self.color_map.items():
+            distance = self._color_distance(test_rgb, color_rgb)
+            distances.append((distance, color_name, color_rgb))
+        
+        # Sort by distance (closest first)
+        distances.sort()
+        
+        for distance, color_name, color_rgb in distances:
+            match_status = "✓ MATCH" if distance < self.color_threshold else "✗ no match"
+            print(f"  {color_name:12} {color_rgb}: {distance:6.2f} {match_status}")
+        
+        closest_color = distances[0][1]
+        print(f"\nClosest color: {closest_color} (distance: {distances[0][0]:.2f})")
+    
+    def debug_color_reading(self, sensor: Any = None) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int], str]:
+        """Debug method to show both raw and converted values
+        
+        Args:
+            sensor: The sensor to read from (None for standalone mode)
+            
+        Returns:
+            Tuple containing (raw_values, converted_rgb, color_name)
+        """
+        if self.standalone:
+            raw_values = self.sensor.read()
+        else:
+            raw_values = sensor.read()
+            
+        converted_rgb = self._raw_to_rgb(raw_values[0], raw_values[1], raw_values[2], raw_values[3])
+        color_name = self.rgb_to_color_name(converted_rgb)
+        
+        print(f"Raw ADC values: R={raw_values[0]}, G={raw_values[1]}, B={raw_values[2]}, Clear={raw_values[3]}")
+        print(f"Converted RGB: {converted_rgb}")
+        print(f"Detected color: {color_name}")
+        print(f"Distance to target ({self.target_color}): {self._color_distance(converted_rgb, self.target_rgb):.2f}")
+        
+        # Show distances to all colors
+        self.print_color_distances(converted_rgb)
+        
+        return raw_values, converted_rgb, color_name
+    
+    def get_raw_values(self, sensor: Any = None) -> Tuple[int, int, int, int]:
+        """Get raw ADC values from sensor without conversion
+        
+        Args:
+            sensor: The sensor to read from (None for standalone mode)
+            
+        Returns:
+            Tuple[int, int, int, int]: Raw ADC values (r, g, b, clear)
+        """
+        if self.standalone:
+            return self.sensor.read()
+        else:
+            return sensor.read()
+    
+    def test_conversion_algorithms(self) -> None:
+        """Test all three RGB conversion algorithms on current reading"""
+        print("Testing RGB Conversion Algorithms")
+        print("=" * 50)
+        
+        try:
+            # Read raw values
+            if self.standalone:
+                raw_values = self.sensor.read()
+            else:
+                raw_values = self.read_raw()
+            
+            print(f"Raw ADC values: {raw_values}")
+            r_raw, g_raw, b_raw, clear_raw = raw_values
+            
+            # Test each algorithm
+            algorithms = [
+                ("Default (Ratio + Scale)", "_raw_to_rgb"),
+                ("Alternative (Illumination Corrected)", "_raw_to_rgb_alternative"), 
+                ("Simple (Direct Scaling)", "_raw_to_rgb_simple")
+            ]
+            
+            for name, method_name in algorithms:
+                print(f"\n{name}:")
+                try:
+                    if method_name == "_raw_to_rgb":
+                        rgb = self._raw_to_rgb(r_raw, g_raw, b_raw, clear_raw)
+                    elif method_name == "_raw_to_rgb_alternative":
+                        rgb = self._raw_to_rgb_alternative(r_raw, g_raw, b_raw, clear_raw)
+                    else:  # simple
+                        rgb = self._raw_to_rgb_simple(r_raw, g_raw, b_raw, clear_raw)
+                    
+                    print(f"  RGB: {rgb}")
+                    
+                    # Find closest color and distance
+                    closest_color = self._get_closest_color_name(rgb)
+                    distance = self._color_distance(rgb, self.color_map[closest_color])
+                    print(f"  Closest: {closest_color} (distance: {distance:.2f})")
+                    
+                    if distance <= self.color_threshold:
+                        print(f"  ✓ Match within threshold ({self.color_threshold})")
+                    else:
+                        print("  ✗ No match (exceeds threshold)")
+                        
+                except Exception as e:
+                    print(f"  Error: {e}")
+            
+            print("\n" + "=" * 50)
+            
+        except Exception as e:
+            print(f"Error reading sensor: {e}")
+
     @property
     def target_color_rgb(self) -> Tuple[int, int, int]:
         """ Get the target color for the line.
@@ -457,5 +971,112 @@ class Follow:
 
 
 if __name__ == "__main__":
-    pass
+    print("=== TCS34725 Color Sensor Testing ===")
+    print("Choose a testing mode:")
+    print("1. Test raw-to-RGB conversion (no hardware needed)")
+    print("2. Debug single color reading (requires hardware)")
+    print("3. Test single color calibration (requires hardware)")
+    print("4. Full color calibration (requires hardware)")
+    print("5. Load saved color calibration")
+    
+    try:
+        choice = input("Enter choice (1-5): ").strip()
+        
+        if choice == "1":
+            # Test the conversion without requiring hardware
+            print("\n=== Testing Raw-to-RGB Conversion ===")
+            
+            class TestFollow:
+                def _raw_to_rgb(self, r_raw, g_raw, b_raw, clear_raw):
+                    def extract_int(value):
+                        if isinstance(value, tuple):
+                            return int(value[0]) if len(value) > 0 else 0
+                        return int(value)
+                    
+                    r_raw = extract_int(r_raw)
+                    g_raw = extract_int(g_raw)
+                    b_raw = extract_int(b_raw)
+                    clear_raw = extract_int(clear_raw)
+                        
+                    if clear_raw == 0:
+                        return (0, 0, 0)
+                    
+                    r_ratio = r_raw / clear_raw
+                    g_ratio = g_raw / clear_raw  
+                    b_ratio = b_raw / clear_raw
+                    
+                    max_ratio = max(r_ratio, g_ratio, b_ratio)
+                    
+                    if max_ratio == 0:
+                        return (0, 0, 0)
+                    
+                    r = int((r_ratio / max_ratio) * 255)
+                    g = int((g_ratio / max_ratio) * 255)
+                    b = int((b_ratio / max_ratio) * 255)
+                    
+                    return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+            
+            test_sensor = TestFollow()
+            test_cases = [
+                (614, 572, 481, 1644, "Purple test 1"),
+                (319, 313, 277, 851, "Purple test 2"),
+                (800, 400, 200, 1500, "Reddish test"),
+                (200, 800, 300, 1400, "Greenish test"),
+                (300, 400, 900, 1600, "Blueish test"),
+            ]
+            
+            for r, g, b, c, description in test_cases:
+                result = test_sensor._raw_to_rgb(r, g, b, c)
+                print(f"{description} ({r}, {g}, {b}, {c}) -> RGB: {result}")
+        
+        elif choice in ["2", "3", "4", "5"]:
+            # Create sensor instance for hardware testing
+            try:
+                print("\nInitializing sensor...")
+                sensor = Follow(target_rgb=(255, 0, 0), standalone=True)
+                
+                if choice == "2":
+                    print("\n=== Debug Color Reading ===")
+                    raw_vals, rgb_vals, color_name = sensor.debug_color_reading()
+                    
+                elif choice == "3":
+                    print("\n=== Single Color Test ===")
+                    available_colors = list(sensor.color_map.keys())
+                    print(f"Available colors: {', '.join(available_colors)}")
+                    color_to_test = input("Enter color name to test: ").strip().lower()
+                    if color_to_test in available_colors:
+                        sensor.test_single_color(color_to_test)
+                    else:
+                        print(f"Color '{color_to_test}' not found!")
+                
+                elif choice == "4":
+                    print("\n=== Full Color Calibration ===")
+                    updated_map = sensor.test_and_calibrate_colors()
+                    
+                    # Ask if user wants to save
+                    save_choice = input("Save calibration to file? (y/n): ").lower().strip()
+                    if save_choice == 'y':
+                        filename = input("Filename (default: color_calibration.py): ").strip()
+                        if not filename:
+                            filename = "color_calibration.py"
+                        sensor.save_color_map(filename)
+                
+                elif choice == "5":
+                    print("\n=== Load Color Calibration ===")
+                    filename = input("Filename (default: color_calibration.py): ").strip()
+                    if not filename:
+                        filename = "color_calibration.py"
+                    sensor.load_color_map(filename)
+                    
+            except Exception as e:
+                print(f"Hardware error: {e}")
+                print("Make sure the sensor is properly connected.")
+        
+        else:
+            print("Invalid choice!")
+            
+    except KeyboardInterrupt:
+        print("\nExiting...")
+    except Exception as e:
+        print(f"Error: {e}")
 
