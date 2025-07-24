@@ -76,7 +76,7 @@ OBSTACLE_AVOID_TURNING_POWER = 50
 
 
 '''Configure the power of the line_track mode'''
-LINE_TRACK_POWER = 80
+LINE_TRACK_POWER = 30
 
 '''Configure singal light'''
 singal_on_color = [255, 255, 0] # amber:[255, 191, 0]
@@ -92,6 +92,7 @@ _start_line_track_printed = False
 line_track_active = False
 line_status = None
 hub_started = False
+hub_reached = False
 to_destination = False
 
 lights_brightness = 0.2
@@ -128,7 +129,7 @@ try:
     speed = Speed(8, 9)
     grayscale = Grayscale(26, 27, 28)
     ws = WS_Server(name=NAME, mode=WIFI_MODE, ssid=SSID, password=PASSWORD)
-    sensors = Follow(target_rgb=(255, 0, 0))
+    sensors = Follow(target_color="lila")  # Using color name instead of RGB tuple
     left_color = sensors.get_color_str()[0]
     middle_color = sensors.get_color_str()[1]
     right_color = sensors.get_color_str()[2]
@@ -286,6 +287,7 @@ def hub():
         # TODO: Check how long it takes for a 90° Turn. or stop turning when the right sensor is not in the hub anymore (not green)
         move("turn in place right", _power) 
         time.sleep(1)
+        stop()
 
     
     direction = sensors.hub_find_line("Green")
@@ -301,7 +303,7 @@ def hub():
             hub_started = False
 
 def line_track():
-    global line_out_time, move_status, line_status, line_track_active, to_destination
+    global line_out_time, move_status, line_status, line_track_active, to_destination, hub_reached
     _power = LINE_TRACK_POWER
 
     if should_exit_with_cleanup("line_track", cleanup_line_track):
@@ -318,6 +320,8 @@ def line_track():
         hub_reached = left_sensor and middle_sensor and right_sensor
 
     # Move in the direction returned from the method follow_line()
+    if direction is None:
+        direction = "stop"
     move(direction, _power)
     line_track_active = True
 
@@ -433,7 +437,7 @@ def brake_lights_handler():
 
 '''----------------- on_receive (ws.loop()) ---------------------'''
 def on_receive(data):
-    global throttle_power, steer_power, move_status, is_move_last , mode, dpad_touched, line_status
+    global throttle_power, steer_power, move_status, is_move_last , mode, dpad_touched, line_status, line_track_active
     global sonar_on
     global start, prev_modes, start_line_track
 
@@ -529,6 +533,9 @@ def on_receive(data):
             if start_line_track:
                 start_line_track = False
                 _start_line_track_printed = False
+                mode = None
+                line_track_active = False
+                line_status = None
                 print("Line Track Mode Disabled")
 
     # TODO: adapt to the new follow_line method (Follow class - line track functions)
@@ -536,6 +543,7 @@ def on_receive(data):
     if 'I' in data.keys() and start and start_line_track and data['I']:
         if not line_track_active:
             mode = 'line track'
+            print('line track enabled')
             line_status = None
         if line_track_active and line_status is None:
             line_status = "start"
@@ -608,10 +616,13 @@ def remote_handler():
 
     ''' mode: Line Track or Obstacle Avoid or Follow '''
     if not dpad_touched and start_line_track:
-        if mode == 'line track' and line_status == "start":
-            hub()
-            if line_status == 'target found' or line_status == "line end":
-                line_track()
+        if mode == 'line track':
+            # INFO: debug 
+            # hub()
+            line_status = 'target found'
+            line_track()
+            # if line_status == 'target found' or line_status == "line end":
+                # line_track()
             if line_status == "out of line":
                 # TODO: mit der Gruppe besprechen was passieren soll wenn das auto die farbige linie verloren hat. 
                 pass

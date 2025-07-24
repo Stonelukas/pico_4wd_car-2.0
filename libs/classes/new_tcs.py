@@ -372,3 +372,22 @@ if __name__ == "__main__":
     # Get a tuple of integers (red, green, blue, clear)
     r, g, b, c = sensor.read()
     print(f"Red: {r}, Green: {g}, Blue: {b}, Clear: {c}")
+
+    gammatable = [x for x in range(0, 255)]
+
+    for i in range(255):
+        x = i 
+        x /= 255
+        x = pow(x, 2.5)
+        x *= 255
+        
+        gammatable[i] = x 
+    
+    # print(gammatable)
+    
+    r = r / c * 335
+    g = g / c * 335
+    b = b / c * 335
+    print(f"Red: {r}, Green: {g}, Blue: {b}")
+    red = gammatable[int(r)]
+    print(red)
