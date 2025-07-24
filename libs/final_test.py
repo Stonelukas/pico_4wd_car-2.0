@@ -1,13 +1,14 @@
 from classes.follow import Follow
 from helper import set_debug
+from time import sleep
 
 follow = Follow("green", True)
 set_debug(True)
 
-left = follow.read_raw("middle")
-middle = follow.read_raw("middle")
-right = follow.read_raw("right")
-print(f"left: {left}, middle: {middle}, right: {right}")
+while True:
+    print(follow.simple_get_line())
+    sleep(2)
+    
 
 
 # print("\t Testing left sensor")

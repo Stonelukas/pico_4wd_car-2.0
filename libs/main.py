@@ -130,9 +130,6 @@ try:
     grayscale = Grayscale(26, 27, 28)
     ws = WS_Server(name=NAME, mode=WIFI_MODE, ssid=SSID, password=PASSWORD)
     sensors = Follow(target_color="lila")  # Using color name instead of RGB tuple
-    left_color = sensors.get_color_str()[0]
-    middle_color = sensors.get_color_str()[1]
-    right_color = sensors.get_color_str()[2]
 except Exception as e:
     onboard_led.off()
     sys.print_exception(e)
@@ -270,37 +267,6 @@ def my_car_move(throttle_power, steer_power, gradually=False):
 
 '''----------------- color_line_track ---------------------'''
 
-def hub():
-    global line_out_time, move_status, line_status, line_track_active, hub_started
-    _power = LINE_TRACK_POWER
-
-    line_track_active = True
-    
-    # Check exit conditions at the start
-    if should_exit_with_cleanup("line_track", cleanup_line_track):
-        return
-
-    if not hub_started and sensors.hub_control_start("Green"):
-        hub_started = True
-        move("forward", _power)
-        time.sleep_ms(100)
-        # TODO: Check how long it takes for a 90° Turn. or stop turning when the right sensor is not in the hub anymore (not green)
-        move("turn in place right", _power) 
-        time.sleep(1)
-        stop()
-
-    
-    direction = sensors.hub_find_line("Green")
-    right_color = sensors.get_color_str()[2]
-
-    if hub_started:
-        # move into to the direction from the method hub_find_line() only if the right sensor did not detect the target color.
-        if not right_color == sensors.target_color:
-            move(direction, _power)
-        else: 
-            stop()
-            line_status = "target found"
-            hub_started = False
 
 def line_track():
     global line_out_time, move_status, line_status, line_track_active, to_destination, hub_reached
@@ -310,14 +276,6 @@ def line_track():
         return
 
     direction = sensors.follow_line(_power)
-    if line_status == "target found":
-        left_sensor, middle_sensor, right_sensor = sensors.color_match_bool("terracotta")
-        # True if all Sensors detect terracotta
-        to_destination = left_sensor and middle_sensor and right_sensor
-    elif line_status == "line end":
-        left_sensor, middle_sensor, right_sensor = sensors.color_match_bool("green")
-        # True if all Sensore detect Green
-        hub_reached = left_sensor and middle_sensor and right_sensor
 
     # Move in the direction returned from the method follow_line()
     if direction is None:
@@ -545,8 +503,8 @@ def on_receive(data):
             mode = 'line track'
             print('line track enabled')
             line_status = None
-        if line_track_active and line_status is None:
-            line_status = "start"
+        # if line_track_active and line_status is None:
+        #     line_status = "start"
 
             
 

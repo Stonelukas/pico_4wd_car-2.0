@@ -53,6 +53,8 @@ class Follow:
             "blue": (121, 157, 147),
         }
         self.rgb_to_color = {v: k for k, v in self.color_map.items()}
+        self.min_lila_map = (150, 140, 110, 350)
+        self.max_lila_map = (200, 190, 160, 600)
 
         # Convert target_color to RGB tuple and validate
         if isinstance(target_color, str):
@@ -1017,6 +1019,19 @@ class Follow:
 
         return (left, middle, right)
 
+    def simple_get_line(self):
+        l = self.read_raw("left")
+        m = self.read_raw("middle")
+        r = self.read_raw("right")
+
+        print(l, m, r)
+
+        left = all(lower <= value <= upper for value, lower, upper in zip(l, self.min_lila_map, self.max_lila_map))
+        middle = all(lower <= value <= upper for value, lower, upper in zip(m, self.min_lila_map, self.max_lila_map))
+        right = all(lower <= value <= upper for value, lower, upper in zip(r, self.min_lila_map, self.max_lila_map))
+
+        return (left, middle, right)
+
     def get_line_position(self, current_mode: Optional[str] = None) -> Optional[str]:
         """Determine the position of the line based on sensor readings."""
         self.current_mode = current_mode
@@ -1026,60 +1041,22 @@ class Follow:
             print("Not in line track mode, skipping get_line_position.")
             return None
 
-        left_color = self._read_sensor(self.left_sensor)
-        middle_color = self._read_sensor(self.middle_sensor)
-        right_color = self._read_sensor(self.right_sensor)
+        left = self.simple_get_line()[0]
+        middle = self.simple_get_line()[1]
+        right = self.simple_get_line()[2]
+        print(left, middle, right)
 
-        left_distance = self._color_distance(left_color, self.target_rgb)
-        middle_distance = self._color_distance(middle_color, self.target_rgb)
-        right_distance = self._color_distance(right_color, self.target_rgb)
-
-        color_left = self.get_color_str()[0]
-        color_middle = self.get_color_str()[1]
-        color_right = self.get_color_str()[2]
-
-        # Check if debug mode is enabled to decide whether to print
-        is_debug = get_debug() and self.current_mode == "line track"
-        if is_debug:
-            left = self.rgb_to_color_name(left_color)
-            middle = self.rgb_to_color_name(middle_color)
-            right = self.rgb_to_color_name(right_color)
-            # debug_print(
-            #     (f"Left RGB: {left_color} - Color: {color_left}, Middle RGB: {middle_color} - Color: {color_middle}, Right RGB: {right_color} - Color: {color_right}"),
-            #     action="line_track",
-            #     msg="Color Readings",
-            # )
-            # debug_print(
-            #     (
-            #         f"Distances - Left: {left_distance}, Middle: {middle_distance}, Right: {right_distance}"
-            #     ),
-            #     action="line_track",
-            #     msg="Distance Values",
-            # )
-        # Determine which sensor is closest to the target color
-
-        # If all sensors are too far from the target color, return None
-        if (
-            color_left != self.target_color
-            and color_middle != self.target_color
-            and color_right != self.target_color
-        ):
-            # if is_debug:
-                # debug_print(
-                #     "No target color detected by any sensor!",
-                #     action="line_track",
-                #     msg="Warning",
-                # )
-            # else:
-            #     print("No target color detected by any sensor!")
+        if left is None and middle is None and right is None:
             return None
 
-        if color_left == self.target_color:
+        if left:
             return "left"
-        elif color_right == self.target_color:
+        elif right:
             return "right"
-        else:
+        elif middle:
             return "forward"
+        else: 
+            return None
 
     def color_match_bool(self, match_color: str) -> Tuple[bool, bool, bool]:
         left_color = self.color_match(
@@ -1094,22 +1071,6 @@ class Follow:
 
         return left_color, middle_color, right_color
 
-    def hub_control_start(self, hub_color: str = "Green") -> Optional[bool]:
-        left_color, middle_color, right_color = self.color_match_bool(hub_color)
-
-        if not (left_color and middle_color and right_color):
-            print("Auto ist nicht im Hub")
-            return None
-        else:
-            return True
-
-    def hub_find_line(self, hub_color: str = "Green") -> Optional[str]:
-        left_color, middle_color, right_color = self.color_match_bool(hub_color)
-
-        if left_color and middle_color:
-            return "forward"
-        else:
-            return "left"
 
     def follow_line(self, power: int) -> Optional[str]:
         """Follow the line based on sensor readings.
@@ -1157,30 +1118,30 @@ class Follow:
             # Reset the timer if line is detected
             self.line_out_time = 0
         # Execute movement based on line position
-        if position == "left":
-            # if is_debug:
-                # debug_print(
-                #     ("Direction: {position}, Power: {power}"),
-                #     action="line_track",
-                #     msg="Following line",
-                # )
-            print(f"Direction: {position}")
-        elif position == "right":
-            # if is_debug:
-            #     debug_print(
-            #         (f"Direction: {position}, Power: {power}"),
-            #         action="line_track",
-            #         msg="Following line",
-            #     )
-            print(f"Direction: {position}")
-        else:
-            # if is_debug:
-            #     debug_print(
-            #         (f"Direction: {position}, Power: {power}"),
-            #         action="line_track",
-            #         msg="Following line",
-            #     )
-            print(f"Direction: {position}")
+        # if position == "left":
+        #     # if is_debug:
+        #         # debug_print(
+        #         #     ("Direction: {position}, Power: {power}"),
+        #         #     action="line_track",
+        #         #     msg="Following line",
+        #         # )
+        #     print(f"Direction: {position}")
+        # elif position == "right":
+        #     # if is_debug:
+        #     #     debug_print(
+        #     #         (f"Direction: {position}, Power: {power}"),
+        #     #         action="line_track",
+        #     #         msg="Following line",
+        #     #     )
+        #     print(f"Direction: {position}")
+        # else:
+        #     # if is_debug:
+        #     #     debug_print(
+        #     #         (f"Direction: {position}, Power: {power}"),
+        #     #         action="line_track",
+        #     #         msg="Following line",
+        #     #     )
+        #     print(f"Direction: {position}")
         # Small delay to avoid overwhelming the motors
         sleep(0.1)
         return position
